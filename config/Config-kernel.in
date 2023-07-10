@@ -45,6 +45,11 @@ config KERNEL_MIPS_FP_SUPPORT
 	bool
 	default y if TARGET_pistachio
 
+config KERNEL_RISCV_PMU
+	bool
+	default y if TARGET_siliconwaves
+	select KERNEL_PERF_EVENTS
+
 config KERNEL_ARM_PMU
 	bool
 	default n
