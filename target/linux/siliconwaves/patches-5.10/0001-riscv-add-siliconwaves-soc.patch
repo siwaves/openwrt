@@ -1,0 +1,804 @@
+From f4e29643b0a6c813a2fe2d56500c43f74cd32616 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Mon, 10 Jul 2023 17:11:14 +0800
+Subject: [PATCH] riscv: add siliconwaves soc
+
+---
+ arch/riscv/Kconfig.socs                       |   7 +
+ drivers/irqchip/Kconfig                       |  13 +
+ drivers/irqchip/Makefile                      |   1 +
+ drivers/irqchip/irq-siliconwaves-plic.c       | 389 ++++++++++++++++++
+ drivers/soc/Kconfig                           |   1 +
+ drivers/soc/Makefile                          |   1 +
+ drivers/soc/siliconwaves/Kconfig              |   9 +
+ drivers/soc/siliconwaves/Makefile             |   2 +
+ .../soc/siliconwaves/siliconwaves_l2_cache.c  | 250 +++++++++++
+ include/linux/cpuhotplug.h                    |   1 +
+ .../soc/siliconwaves/siliconwaves_l2_cache.h  |  16 +
+ 11 files changed, 690 insertions(+)
+ create mode 100644 drivers/irqchip/irq-siliconwaves-plic.c
+ create mode 100644 drivers/soc/siliconwaves/Kconfig
+ create mode 100644 drivers/soc/siliconwaves/Makefile
+ create mode 100644 drivers/soc/siliconwaves/siliconwaves_l2_cache.c
+ create mode 100644 include/soc/siliconwaves/siliconwaves_l2_cache.h
+
+diff --git a/arch/riscv/Kconfig.socs b/arch/riscv/Kconfig.socs
+index 8a55f6156..3abf55fff 100644
+--- a/arch/riscv/Kconfig.socs
++++ b/arch/riscv/Kconfig.socs
+@@ -48,4 +48,11 @@ config SOC_KENDRYTE_K210_DTB_BUILTIN
+ 	  This option should be selected if no bootloader is being used.
+ 	  If unsure, say Y.
+ 
++config SOC_SILICONWAVES
++	bool "Siliconwaves SoCs"
++	select SILICONWAVES_PLIC
++	select SILICONWAVES_L2_CACHE
++	help
++	  This enables support for Siliconwaves SoC platform hardware.
++
+ endmenu
+diff --git a/drivers/irqchip/Kconfig b/drivers/irqchip/Kconfig
+index 3c24bf452..53a2c1beb 100644
+--- a/drivers/irqchip/Kconfig
++++ b/drivers/irqchip/Kconfig
+@@ -599,4 +599,17 @@ config MST_IRQ
+ 	help
+ 	  Support MStar Interrupt Controller.
+ 
++config SILICONWAVES_PLIC
++	bool "Siliconwaves Platform-Level Interrupt Controller"
++	depends on RISCV
++	select IRQ_DOMAIN_HIERARCHY
++	help
++	   This enables support for the PLIC chip found in Siliconwaves (and
++	   potentially other) RISC-V systems.  The PLIC controls devices
++	   interrupts and connects them to each core's local interrupt
++	   controller.  Aside from timer and software interrupts, all other
++	   interrupt sources are subordinate to the PLIC.
++
++	   If you don't know what to do here, say Y.
++
+ endmenu
+diff --git a/drivers/irqchip/Makefile b/drivers/irqchip/Makefile
+index 94c288588..91778d1d5 100644
+--- a/drivers/irqchip/Makefile
++++ b/drivers/irqchip/Makefile
+@@ -114,3 +114,4 @@ obj-$(CONFIG_LOONGSON_PCH_PIC)		+= irq-loongson-pch-pic.o
+ obj-$(CONFIG_LOONGSON_PCH_MSI)		+= irq-loongson-pch-msi.o
+ obj-$(CONFIG_MST_IRQ)			+= irq-mst-intc.o
+ obj-$(CONFIG_SL28CPLD_INTC)		+= irq-sl28cpld.o
++obj-$(CONFIG_SILICONWAVES_PLIC)		+= irq-siliconwaves-plic.o
+diff --git a/drivers/irqchip/irq-siliconwaves-plic.c b/drivers/irqchip/irq-siliconwaves-plic.c
+new file mode 100644
+index 000000000..f5ed2b712
+--- /dev/null
++++ b/drivers/irqchip/irq-siliconwaves-plic.c
+@@ -0,0 +1,389 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2023 Siliconwaves
++ */
++#define pr_fmt(fmt) "plic: " fmt
++#include <linux/cpu.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/irq.h>
++#include <linux/irqchip.h>
++#include <linux/irqchip/chained_irq.h>
++#include <linux/irqdomain.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/of_irq.h>
++#include <linux/platform_device.h>
++#include <linux/spinlock.h>
++#include <asm/smp.h>
++
++#define MAX_DEVICES			1024
++#define MAX_CONTEXTS			15872
++
++/*
++ * Each interrupt source has a priority register associated with it.
++ * We always hardwire it to one in Linux.
++ */
++#define PRIORITY_BASE			0
++#define     PRIORITY_PER_ID		4
++
++/*
++ * Each hart context has a vector of interrupt enable bits associated with it.
++ * There's one bit for each interrupt source.
++ */
++#define ENABLE_BASE			0x2000
++#define     ENABLE_PER_HART		0x80
++
++/*
++ * Each hart context has a set of control registers associated with it.  Right
++ * now there's only two: a source priority threshold over which the hart will
++ * take an interrupt, and a register to claim interrupts.
++ */
++#define CONTEXT_BASE			0x200000
++#define     CONTEXT_PER_HART		0x1000
++#define     CONTEXT_THRESHOLD		0x00
++#define     CONTEXT_CLAIM		0x04
++
++#define	PLIC_DISABLE_THRESHOLD		0x7
++#define	PLIC_ENABLE_THRESHOLD		0
++
++struct plic_priv {
++	struct cpumask lmask;
++	struct irq_domain *irqdomain;
++	void __iomem *regs;
++};
++
++struct plic_handler {
++	bool			present;
++	void __iomem		*hart_base;
++	/*
++	 * Protect mask operations on the registers given that we can't
++	 * assume atomic memory operations work on them.
++	 */
++	raw_spinlock_t		enable_lock;
++	void __iomem		*enable_base;
++	struct plic_priv	*priv;
++};
++static int plic_parent_irq;
++static bool plic_cpuhp_setup_done;
++static DEFINE_PER_CPU(struct plic_handler, plic_handlers);
++
++static inline void plic_toggle(struct plic_handler *handler,
++				int hwirq, int enable)
++{
++	u32 __iomem *reg = handler->enable_base + (hwirq / 32) * sizeof(u32);
++	u32 hwirq_mask = 1 << (hwirq % 32);
++
++	raw_spin_lock(&handler->enable_lock);
++	if (enable)
++		writel(readl(reg) | hwirq_mask, reg);
++	else
++		writel(readl(reg) & ~hwirq_mask, reg);
++	raw_spin_unlock(&handler->enable_lock);
++}
++
++static inline void plic_irq_toggle(const struct cpumask *mask,
++				   struct irq_data *d, int enable)
++{
++	int cpu;
++	struct plic_priv *priv = irq_data_get_irq_chip_data(d);
++
++	writel(enable, priv->regs + PRIORITY_BASE + d->hwirq * PRIORITY_PER_ID);
++	for_each_cpu(cpu, mask) {
++		struct plic_handler *handler = per_cpu_ptr(&plic_handlers, cpu);
++
++		if (handler->present &&
++		    cpumask_test_cpu(cpu, &handler->priv->lmask))
++			plic_toggle(handler, d->hwirq, enable);
++	}
++}
++
++static void plic_irq_unmask(struct irq_data *d)
++{
++	struct cpumask amask;
++	unsigned int cpu;
++	struct plic_priv *priv = irq_data_get_irq_chip_data(d);
++
++	cpumask_and(&amask, &priv->lmask, cpu_online_mask);
++	cpu = cpumask_any_and(irq_data_get_affinity_mask(d),
++					   &amask);
++	if (WARN_ON_ONCE(cpu >= nr_cpu_ids))
++		return;
++	plic_irq_toggle(cpumask_of(cpu), d, 1);
++}
++
++static void plic_irq_mask(struct irq_data *d)
++{
++	struct plic_priv *priv = irq_data_get_irq_chip_data(d);
++
++	plic_irq_toggle(&priv->lmask, d, 0);
++}
++
++#ifdef CONFIG_SMP
++static int plic_set_affinity(struct irq_data *d,
++			     const struct cpumask *mask_val, bool force)
++{
++	unsigned int cpu;
++	struct cpumask amask;
++	struct plic_priv *priv = irq_data_get_irq_chip_data(d);
++
++	cpumask_and(&amask, &priv->lmask, mask_val);
++
++	if (force)
++		cpu = cpumask_first(&amask);
++	else
++		cpu = cpumask_any_and(&amask, cpu_online_mask);
++
++	if (cpu >= nr_cpu_ids)
++		return -EINVAL;
++
++	plic_irq_toggle(&priv->lmask, d, 0);
++	plic_irq_toggle(cpumask_of(cpu), d, !irqd_irq_masked(d));
++
++	irq_data_update_effective_affinity(d, cpumask_of(cpu));
++
++	return IRQ_SET_MASK_OK_DONE;
++}
++#endif
++
++static void plic_irq_eoi(struct irq_data *d)
++{
++	struct plic_handler *handler = this_cpu_ptr(&plic_handlers);
++
++	if (irqd_irq_masked(d)) {
++		plic_irq_unmask(d);
++		writel(d->hwirq, handler->hart_base + CONTEXT_CLAIM);
++		plic_irq_mask(d);
++	} else {
++		writel(d->hwirq, handler->hart_base + CONTEXT_CLAIM);
++	}
++}
++
++static struct irq_chip plic_chip = {
++	.name		= "Siliconwaves PLIC",
++	.irq_mask	= plic_irq_mask,
++	.irq_unmask	= plic_irq_unmask,
++	.irq_eoi	= plic_irq_eoi,
++#ifdef CONFIG_SMP
++	.irq_set_affinity = plic_set_affinity,
++#endif
++};
++
++static int plic_irqdomain_map(struct irq_domain *d, unsigned int irq,
++			      irq_hw_number_t hwirq)
++{
++	struct plic_priv *priv = d->host_data;
++
++	irq_domain_set_info(d, irq, hwirq, &plic_chip, d->host_data,
++			    handle_fasteoi_irq, NULL, NULL);
++	irq_set_noprobe(irq);
++	irq_set_affinity(irq, &priv->lmask);
++	return 0;
++}
++
++static int plic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
++				 unsigned int nr_irqs, void *arg)
++{
++	int i, ret;
++	irq_hw_number_t hwirq;
++	unsigned int type;
++	struct irq_fwspec *fwspec = arg;
++
++	ret = irq_domain_translate_onecell(domain, fwspec, &hwirq, &type);
++	if (ret)
++		return ret;
++
++	for (i = 0; i < nr_irqs; i++) {
++		ret = plic_irqdomain_map(domain, virq + i, hwirq + i);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static const struct irq_domain_ops plic_irqdomain_ops = {
++	.translate	= irq_domain_translate_onecell,
++	.alloc		= plic_irq_domain_alloc,
++	.free		= irq_domain_free_irqs_top,
++};
++
++/*
++ * Handling an interrupt is a two-step process: first you claim the interrupt
++ * by reading the claim register, then you complete the interrupt by writing
++ * that source ID back to the same claim register.  This automatically enables
++ * and disables the interrupt, so there's nothing else to do.
++ */
++static void plic_handle_irq(struct irq_desc *desc)
++{
++	struct plic_handler *handler = this_cpu_ptr(&plic_handlers);
++	struct irq_chip *chip = irq_desc_get_chip(desc);
++	void __iomem *claim = handler->hart_base + CONTEXT_CLAIM;
++	irq_hw_number_t hwirq;
++
++	WARN_ON_ONCE(!handler->present);
++
++	chained_irq_enter(chip, desc);
++
++	while ((hwirq = readl(claim))) {
++		int irq = irq_find_mapping(handler->priv->irqdomain, hwirq);
++
++		if (unlikely(irq <= 0))
++			pr_warn_ratelimited("can't find mapping for hwirq %lu\n",
++					hwirq);
++		else
++			generic_handle_irq(irq);
++	}
++
++	chained_irq_exit(chip, desc);
++}
++
++static void plic_set_threshold(struct plic_handler *handler, u32 threshold)
++{
++	/* priority must be > threshold to trigger an interrupt */
++	writel(threshold, handler->hart_base + CONTEXT_THRESHOLD);
++}
++
++static int plic_dying_cpu(unsigned int cpu)
++{
++	if (plic_parent_irq)
++		disable_percpu_irq(plic_parent_irq);
++
++	return 0;
++}
++
++static int plic_starting_cpu(unsigned int cpu)
++{
++	struct plic_handler *handler = this_cpu_ptr(&plic_handlers);
++
++	if (plic_parent_irq)
++		enable_percpu_irq(plic_parent_irq,
++				  irq_get_trigger_type(plic_parent_irq));
++	else
++		pr_warn("cpu%d: parent irq not available\n", cpu);
++	plic_set_threshold(handler, PLIC_ENABLE_THRESHOLD);
++
++	return 0;
++}
++
++static int __init plic_init(struct device_node *node,
++		struct device_node *parent)
++{
++	int error = 0, nr_contexts, nr_handlers = 0, i;
++	u32 nr_irqs;
++	struct plic_priv *priv;
++	struct plic_handler *handler;
++
++	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	priv->regs = of_iomap(node, 0);
++	if (WARN_ON(!priv->regs)) {
++		error = -EIO;
++		goto out_free_priv;
++	}
++
++	error = -EINVAL;
++	of_property_read_u32(node, "riscv,ndev", &nr_irqs);
++	if (WARN_ON(!nr_irqs))
++		goto out_iounmap;
++
++	nr_contexts = of_irq_count(node);
++	if (WARN_ON(!nr_contexts))
++		goto out_iounmap;
++
++	error = -ENOMEM;
++	priv->irqdomain = irq_domain_add_linear(node, nr_irqs + 1,
++			&plic_irqdomain_ops, priv);
++	if (WARN_ON(!priv->irqdomain))
++		goto out_iounmap;
++
++	for (i = 0; i < nr_contexts; i++) {
++		struct of_phandle_args parent;
++		irq_hw_number_t hwirq;
++		int cpu, hartid;
++
++		if (of_irq_parse_one(node, i, &parent)) {
++			pr_err("failed to parse parent for context %d.\n", i);
++			continue;
++		}
++
++		/*
++		 * Skip contexts other than external interrupts for our
++		 * privilege level.
++		 */
++		if (parent.args[0] != RV_IRQ_EXT)
++			continue;
++
++		hartid = riscv_of_parent_hartid(parent.np);
++		if (hartid < 0) {
++			pr_warn("failed to parse hart ID for context %d.\n", i);
++			continue;
++		}
++
++		cpu = riscv_hartid_to_cpuid(hartid);
++		if (cpu < 0) {
++			pr_warn("Invalid cpuid for context %d\n", i);
++			continue;
++		}
++
++		/* Find parent domain and register chained handler */
++		if (!plic_parent_irq && irq_find_host(parent.np)) {
++			plic_parent_irq = irq_of_parse_and_map(node, i);
++			if (plic_parent_irq)
++				irq_set_chained_handler(plic_parent_irq,
++							plic_handle_irq);
++		}
++
++		/*
++		 * When running in M-mode we need to ignore the S-mode handler.
++		 * Here we assume it always comes later, but that might be a
++		 * little fragile.
++		 */
++		handler = per_cpu_ptr(&plic_handlers, cpu);
++		if (handler->present) {
++			pr_warn("handler already present for context %d.\n", i);
++			plic_set_threshold(handler, PLIC_DISABLE_THRESHOLD);
++			goto done;
++		}
++
++		cpumask_set_cpu(cpu, &priv->lmask);
++		handler->present = true;
++		handler->hart_base =
++			priv->regs + CONTEXT_BASE + i * CONTEXT_PER_HART;
++		raw_spin_lock_init(&handler->enable_lock);
++		handler->enable_base =
++			priv->regs + ENABLE_BASE + i * ENABLE_PER_HART;
++		handler->priv = priv;
++done:
++		for (hwirq = 1; hwirq <= nr_irqs; hwirq++)
++			plic_toggle(handler, hwirq, 0);
++		nr_handlers++;
++	}
++
++	/*
++	 * We can have multiple PLIC instances so setup cpuhp state only
++	 * when context handler for current/boot CPU is present.
++	 */
++	handler = this_cpu_ptr(&plic_handlers);
++	if (handler->present && !plic_cpuhp_setup_done) {
++		cpuhp_setup_state(CPUHP_AP_IRQ_SILICONWAVES_PLIC_STARTING,
++				  "irqchip/siliconwaves/plic:starting",
++				  plic_starting_cpu, plic_dying_cpu);
++		plic_cpuhp_setup_done = true;
++	}
++
++	pr_info("%pOFP: mapped %d interrupts with %d handlers for"
++		" %d contexts.\n", node, nr_irqs, nr_handlers, nr_contexts);
++	return 0;
++
++out_iounmap:
++	iounmap(priv->regs);
++out_free_priv:
++	kfree(priv);
++	return error;
++}
++
++IRQCHIP_DECLARE(siliconwaves_plic, "siliconwaves,w3k-plic", plic_init);
+diff --git a/drivers/soc/Kconfig b/drivers/soc/Kconfig
+index 425ab6f7e..4a7a692f2 100644
+--- a/drivers/soc/Kconfig
++++ b/drivers/soc/Kconfig
+@@ -23,5 +23,6 @@ source "drivers/soc/versatile/Kconfig"
+ source "drivers/soc/xilinx/Kconfig"
+ source "drivers/soc/zte/Kconfig"
+ source "drivers/soc/kendryte/Kconfig"
++source "drivers/soc/siliconwaves/Kconfig"
+ 
+ endmenu
+diff --git a/drivers/soc/Makefile b/drivers/soc/Makefile
+index 36452bed8..155ed80a6 100644
+--- a/drivers/soc/Makefile
++++ b/drivers/soc/Makefile
+@@ -29,3 +29,4 @@ obj-$(CONFIG_PLAT_VERSATILE)	+= versatile/
+ obj-y				+= xilinx/
+ obj-$(CONFIG_ARCH_ZX)		+= zte/
+ obj-$(CONFIG_SOC_KENDRYTE)	+= kendryte/
++obj-$(CONFIG_SOC_SILICONWAVES)	+= siliconwaves/
+diff --git a/drivers/soc/siliconwaves/Kconfig b/drivers/soc/siliconwaves/Kconfig
+new file mode 100644
+index 000000000..f9294f32a
+--- /dev/null
++++ b/drivers/soc/siliconwaves/Kconfig
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: GPL-2.0
++
++if SOC_SILICONWAVES
++
++config SILICONWAVES_L2_CACHE
++	bool "Siliconwaves L2 Cache controller"
++	help
++	  Support for the L2 cache controller on Siliconwaves platforms.
++endif
+diff --git a/drivers/soc/siliconwaves/Makefile b/drivers/soc/siliconwaves/Makefile
+new file mode 100644
+index 000000000..da92a3257
+--- /dev/null
++++ b/drivers/soc/siliconwaves/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_SILICONWAVES_L2_CACHE) += siliconwaves_l2_cache.o
+\ No newline at end of file
+diff --git a/drivers/soc/siliconwaves/siliconwaves_l2_cache.c b/drivers/soc/siliconwaves/siliconwaves_l2_cache.c
+new file mode 100644
+index 000000000..05e5ff41a
+--- /dev/null
++++ b/drivers/soc/siliconwaves/siliconwaves_l2_cache.c
+@@ -0,0 +1,250 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * SiFive L2 cache controller Driver
++ *
++ * Copyright (C) 2018-2019 SiFive, Inc.
++ *
++ */
++#include <linux/debugfs.h>
++#include <linux/interrupt.h>
++#include <linux/of_irq.h>
++#include <linux/of_address.h>
++#include <linux/device.h>
++#include <asm/cacheinfo.h>
++#include <soc/siliconwaves/siliconwaves_l2_cache.h>
++
++#define SILICONWAVES_L2_DIRECCFIX_LOW 0x100
++#define SILICONWAVES_L2_DIRECCFIX_HIGH 0x104
++#define SILICONWAVES_L2_DIRECCFIX_COUNT 0x108
++
++#define SILICONWAVES_L2_DIRECCFAIL_LOW 0x120
++#define SILICONWAVES_L2_DIRECCFAIL_HIGH 0x124
++#define SILICONWAVES_L2_DIRECCFAIL_COUNT 0x128
++
++#define SILICONWAVES_L2_DATECCFIX_LOW 0x140
++#define SILICONWAVES_L2_DATECCFIX_HIGH 0x144
++#define SILICONWAVES_L2_DATECCFIX_COUNT 0x148
++
++#define SILICONWAVES_L2_DATECCFAIL_LOW 0x160
++#define SILICONWAVES_L2_DATECCFAIL_HIGH 0x164
++#define SILICONWAVES_L2_DATECCFAIL_COUNT 0x168
++
++#define SILICONWAVES_L2_CONFIG 0x00
++#define SILICONWAVES_L2_WAYENABLE 0x08
++#define SILICONWAVES_L2_ECCINJECTERR 0x40
++
++#define SILICONWAVES_L2_MAX_ECCINTR 4
++
++static void __iomem *l2_base;
++static int g_irq[SILICONWAVES_L2_MAX_ECCINTR];
++static struct riscv_cacheinfo_ops l2_cache_ops;
++
++enum {
++	DIR_CORR = 0,
++	DATA_CORR,
++	DATA_UNCORR,
++	DIR_UNCORR,
++};
++
++#ifdef CONFIG_DEBUG_FS
++static struct dentry *siliconwaves_test;
++
++static ssize_t l2_write(struct file *file, const char __user *data,
++			size_t count, loff_t *ppos)
++{
++	unsigned int val;
++
++	if (kstrtouint_from_user(data, count, 0, &val))
++		return -EINVAL;
++	if ((val < 0xFF) || (val >= 0x10000 && val < 0x100FF))
++		writel(val, l2_base + SILICONWAVES_L2_ECCINJECTERR);
++	else
++		return -EINVAL;
++	return count;
++}
++
++static const struct file_operations l2_fops = { .owner = THIS_MODULE,
++						.open = simple_open,
++						.write = l2_write };
++
++static void setup_siliconwaves_debug(void)
++{
++	siliconwaves_test = debugfs_create_dir("siliconwaves_l2_cache", NULL);
++
++	debugfs_create_file("siliconwaves_debug_inject_error", 0200, siliconwaves_test,
++			    NULL, &l2_fops);
++}
++#endif
++
++static void l2_config_read(void)
++{
++	u32 regval, val;
++
++	regval = readl(l2_base + SILICONWAVES_L2_CONFIG);
++	val = regval & 0xFF;
++	pr_info("L2CACHE: No. of Banks in the cache: %d\n", val);
++	val = (regval & 0xFF00) >> 8;
++	pr_info("L2CACHE: No. of ways per bank: %d\n", val);
++	val = (regval & 0xFF0000) >> 16;
++	pr_info("L2CACHE: Sets per bank: %llu\n", (uint64_t)1 << val);
++	val = (regval & 0xFF000000) >> 24;
++	pr_info("L2CACHE: Bytes per cache block: %llu\n", (uint64_t)1 << val);
++
++	regval = readl(l2_base + SILICONWAVES_L2_WAYENABLE);
++	pr_info("L2CACHE: Index of the largest way enabled: %d\n", regval);
++}
++
++static const struct of_device_id siliconwaves_l2_ids[] = {
++	{ .compatible = "siliconwaves,w3k-ccache" },
++	{ /* end of table */ },
++};
++
++static ATOMIC_NOTIFIER_HEAD(l2_err_chain);
++
++int register_siliconwaves_l2_error_notifier(struct notifier_block *nb)
++{
++	return atomic_notifier_chain_register(&l2_err_chain, nb);
++}
++EXPORT_SYMBOL_GPL(register_siliconwaves_l2_error_notifier);
++
++int unregister_siliconwaves_l2_error_notifier(struct notifier_block *nb)
++{
++	return atomic_notifier_chain_unregister(&l2_err_chain, nb);
++}
++EXPORT_SYMBOL_GPL(unregister_siliconwaves_l2_error_notifier);
++
++static int l2_largest_wayenabled(void)
++{
++	return readl(l2_base + SILICONWAVES_L2_WAYENABLE) & 0xFF;
++}
++
++static ssize_t number_of_ways_enabled_show(struct device *dev,
++					   struct device_attribute *attr,
++					   char *buf)
++{
++	return sprintf(buf, "%u\n", l2_largest_wayenabled());
++}
++
++static DEVICE_ATTR_RO(number_of_ways_enabled);
++
++static struct attribute *priv_attrs[] = {
++	&dev_attr_number_of_ways_enabled.attr,
++	NULL,
++};
++
++static const struct attribute_group priv_attr_group = {
++	.attrs = priv_attrs,
++};
++
++static const struct attribute_group *
++l2_get_priv_group(struct cacheinfo *this_leaf)
++{
++	/* We want to use private group for L2 cache only */
++	if (this_leaf->level == 2)
++		return &priv_attr_group;
++	else
++		return NULL;
++}
++
++static irqreturn_t l2_int_handler(int irq, void *device)
++{
++	unsigned int add_h, add_l;
++
++	if (irq == g_irq[DIR_CORR]) {
++		add_h = readl(l2_base + SILICONWAVES_L2_DIRECCFIX_HIGH);
++		add_l = readl(l2_base + SILICONWAVES_L2_DIRECCFIX_LOW);
++		pr_err("L2CACHE: DirError @ 0x%08X.%08X\n", add_h, add_l);
++		/* Reading this register clears the DirError interrupt sig */
++		readl(l2_base + SILICONWAVES_L2_DIRECCFIX_COUNT);
++		atomic_notifier_call_chain(&l2_err_chain, SILICONWAVES_L2_ERR_TYPE_CE,
++					   "DirECCFix");
++	}
++	if (irq == g_irq[DIR_UNCORR]) {
++		add_h = readl(l2_base + SILICONWAVES_L2_DIRECCFAIL_HIGH);
++		add_l = readl(l2_base + SILICONWAVES_L2_DIRECCFAIL_LOW);
++		/* Reading this register clears the DirFail interrupt sig */
++		readl(l2_base + SILICONWAVES_L2_DIRECCFAIL_COUNT);
++		atomic_notifier_call_chain(&l2_err_chain, SILICONWAVES_L2_ERR_TYPE_UE,
++					   "DirECCFail");
++		panic("L2CACHE: DirFail @ 0x%08X.%08X\n", add_h, add_l);
++	}
++	if (irq == g_irq[DATA_CORR]) {
++		add_h = readl(l2_base + SILICONWAVES_L2_DATECCFIX_HIGH);
++		add_l = readl(l2_base + SILICONWAVES_L2_DATECCFIX_LOW);
++		pr_err("L2CACHE: DataError @ 0x%08X.%08X\n", add_h, add_l);
++		/* Reading this register clears the DataError interrupt sig */
++		readl(l2_base + SILICONWAVES_L2_DATECCFIX_COUNT);
++		atomic_notifier_call_chain(&l2_err_chain, SILICONWAVES_L2_ERR_TYPE_CE,
++					   "DatECCFix");
++	}
++	if (irq == g_irq[DATA_UNCORR]) {
++		add_h = readl(l2_base + SILICONWAVES_L2_DATECCFAIL_HIGH);
++		add_l = readl(l2_base + SILICONWAVES_L2_DATECCFAIL_LOW);
++		pr_err("L2CACHE: DataFail @ 0x%08X.%08X\n", add_h, add_l);
++		/* Reading this register clears the DataFail interrupt sig */
++		readl(l2_base + SILICONWAVES_L2_DATECCFAIL_COUNT);
++		atomic_notifier_call_chain(&l2_err_chain, SILICONWAVES_L2_ERR_TYPE_UE,
++					   "DatECCFail");
++	}
++
++	return IRQ_HANDLED;
++}
++
++static int __init siliconwaves_l2_init(void)
++{
++	struct device_node *np;
++	struct resource res;
++	int i, rc, intr_num;
++
++	np = of_find_matching_node(NULL, siliconwaves_l2_ids);
++	if (!np)
++		return -ENODEV;
++
++	if (of_address_to_resource(np, 0, &res)) {
++		rc = -ENODEV;
++		goto err_node_put;
++	}
++
++	l2_base = ioremap(res.start, resource_size(&res));
++	if (!l2_base) {
++		rc = -ENOMEM;
++		goto err_node_put;
++	}
++
++	intr_num = of_property_count_u32_elems(np, "interrupts");
++	if (!intr_num) {
++		pr_err("L2CACHE: no interrupts property\n");
++		rc = -ENODEV;
++		goto err_unmap;
++	}
++
++	for (i = 0; i < intr_num; i++) {
++		g_irq[i] = irq_of_parse_and_map(np, i);
++		rc = request_irq(g_irq[i], l2_int_handler, 0, "l2_ecc", NULL);
++		if (rc) {
++			pr_err("L2CACHE: Could not request IRQ %d\n", g_irq[i]);
++			goto err_free_irq;
++		}
++	}
++	of_node_put(np);
++
++	l2_config_read();
++
++	l2_cache_ops.get_priv_group = l2_get_priv_group;
++	riscv_set_cacheinfo_ops(&l2_cache_ops);
++
++#ifdef CONFIG_DEBUG_FS
++	setup_siliconwaves_debug();
++#endif
++	return 0;
++
++err_free_irq:
++	while (--i >= 0)
++		free_irq(g_irq[i], NULL);
++err_unmap:
++	iounmap(l2_base);
++err_node_put:
++	of_node_put(np);
++	return rc;
++}
++device_initcall(siliconwaves_l2_init);
+\ No newline at end of file
+diff --git a/include/linux/cpuhotplug.h b/include/linux/cpuhotplug.h
+index fc945f9df..391d9a21b 100644
+--- a/include/linux/cpuhotplug.h
++++ b/include/linux/cpuhotplug.h
+@@ -106,6 +106,7 @@ enum cpuhp_state {
+ 	CPUHP_AP_IRQ_MIPS_GIC_STARTING,
+ 	CPUHP_AP_IRQ_RISCV_STARTING,
+ 	CPUHP_AP_IRQ_SIFIVE_PLIC_STARTING,
++	CPUHP_AP_IRQ_SILICONWAVES_PLIC_STARTING,
+ 	CPUHP_AP_ARM_MVEBU_COHERENCY,
+ 	CPUHP_AP_MICROCODE_LOADER,
+ 	CPUHP_AP_PERF_X86_AMD_UNCORE_STARTING,
+diff --git a/include/soc/siliconwaves/siliconwaves_l2_cache.h b/include/soc/siliconwaves/siliconwaves_l2_cache.h
+new file mode 100644
+index 000000000..c49cb7164
+--- /dev/null
++++ b/include/soc/siliconwaves/siliconwaves_l2_cache.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Siliconwaves L2 Cache Controller header file
++ *
++ */
++
++#ifndef __SOC_SILICONWAVES_L2_CACHE_H
++#define __SOC_SILICONWAVES_L2_CACHE_H
++
++extern int register_siliconwaves_l2_error_notifier(struct notifier_block *nb);
++extern int unregister_siliconwaves_l2_error_notifier(struct notifier_block *nb);
++
++#define SILICONWAVES_L2_ERR_TYPE_CE 0
++#define SILICONWAVES_L2_ERR_TYPE_UE 1
++
++#endif /* __SOC_SILICONWAVES_L2_CACHE_H */                                     
+-- 
+2.34.1
+

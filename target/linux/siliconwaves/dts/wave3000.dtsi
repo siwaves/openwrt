@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/* Copyright (c) 2023-2024 Siliconwaves, Inc */
+
+/dts-v1/;
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	compatible = "siliconwaves,w3k";
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu0: cpu@0 {
+			compatible = "siliconwaves,bullet0", "riscv";
+			d-cache-block-size = <64>;
+			d-cache-sets = <128>;
+			d-cache-size = <32768>;
+			d-tlb-sets = <1>;
+			d-tlb-size = <40>;
+			device_type = "cpu";
+			i-cache-block-size = <64>;
+			i-cache-sets = <2>;
+			i-cache-size = <32768>;
+			i-tlb-sets = <1>;
+			i-tlb-size = <40>;
+			mmu-type = "riscv,sv39";
+			next-level-cache = <&ccache>;
+			reg = <0x0>;
+			riscv,isa = "rv64imafdc";
+			tlb-split;
+			cpu0_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+		cpu1: cpu@1 {
+			compatible = "siliconwaves,bullet0", "riscv";
+			d-cache-block-size = <64>;
+			d-cache-sets = <128>;
+			d-cache-size = <32768>;
+			d-tlb-sets = <1>;
+			d-tlb-size = <40>;
+			device_type = "cpu";
+			i-cache-block-size = <64>;
+			i-cache-sets = <2>;
+			i-cache-size = <32768>;
+			i-tlb-sets = <1>;
+			i-tlb-size = <40>;
+			mmu-type = "riscv,sv39";
+			next-level-cache = <&ccache>;
+			reg = <0x1>;
+			riscv,isa = "rv64imafdc";
+			tlb-split;
+			cpu1_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+	};
+	soc {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		compatible = "siliconwaves,w3k", "simple-bus";
+		ranges;
+		plic0: interrupt-controller@c000000 {
+			#interrupt-cells = <1>;
+			compatible = "siliconwaves,w3k-plic";
+			reg = <0x0 0xc000000 0x0 0x4000000>;
+			riscv,ndev = <69>;
+			interrupt-controller;
+			interrupts-extended = <
+				&cpu0_intc 0xffffffff &cpu0_intc 9
+				&cpu1_intc 0xffffffff &cpu1_intc 9>;
+		};
+		ccache: cache-controller@2010000 {
+			compatible = "siliconwaves,w3k-ccache", "cache";
+			cache-block-size = <64>;
+			cache-level = <2>;
+			cache-sets = <256>;
+			cache-size = <262144>;
+			cache-unified;
+			interrupt-parent = <&plic0>;
+			interrupts = <19 21 22 20>;
+			reg = <0x0 0x2010000 0x0 0x1000>;
+		};
+		uart0: serial@3e103000 {
+			compatible = "ns16550a";
+			reg = <0x0 0x3e103000 0x0 0x1000>;
+			interrupt-parent = <&plic0>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			reg-offset = <0x100>;
+			interrupts = <7>;
+			baud = <115200>;
+			clock-frequency = <10000000>;
+			status = "disabled";
+		};
+		sdhci0: sdhci@3e101000 {
+			compatible = "siliconwaves,w3k-sdhci";
+			reg = <0x0 0x3e101000 0x0 0x1000>;
+			bus-width = <4>;
+			max-frequency = <50000000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <28>;
+			sdhci-caps = <0x0 0x05200000>;
+			cap-mmc-highspeed;
+			status = "disabled";
+		};
+	};
+};
+

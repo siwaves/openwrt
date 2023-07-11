@@ -1,0 +1,14 @@
+Index: openssl-1.1.1u/Configurations/25-openwrt.conf
+===================================================================
+--- openssl-1.1.1u.orig/Configurations/25-openwrt.conf
++++ openssl-1.1.1u/Configurations/25-openwrt.conf
+@@ -44,6 +44,9 @@ my %targets = (
+     "linux-x86_64-openwrt" => {
+         inherit_from    => [ "linux-x86_64", "openwrt" ],
+     },
++    "linux-riscv64-openwrt" => {
++        inherit_from    => [ "linux64-riscv64", "openwrt" ],
++    },
+ 
+ ### Basic default option
+     "linux-generic32-openwrt" => {
