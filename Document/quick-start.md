@@ -77,6 +77,8 @@ Target System 选择Siliconwaves RISC-V
 
 ## 3.3 提前下载openwrt dl文件
 
+为加速编译过程，部分文件已打包上传到云端，这样一次下载后，无需在每次编译过程中通过网络下载这些文件。
+
 链接：https://share.weiyun.com/Gxg9j4Ud 密码：muj8jr
 
 下载好之后，放到openwrt目录，然后执行命令解压：
