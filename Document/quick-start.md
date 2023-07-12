@@ -24,7 +24,7 @@ pip3 install pylibfdt
 # 2. 克隆代码
 
 ```
-git clone https://github.com/siwaves/openwrt
+git clone git@github.com:siwaves/openwrt.git
 cd openwrt
 git checkout openwrt-22.03-linux-5.10.168 
 ```
