@@ -89,18 +89,17 @@
 			cache-size = <262144>;
 			cache-unified;
 			interrupt-parent = <&plic0>;
-			interrupts = <19 21 22 20>;
+			interrupts = <1 2 3 4>;
 			reg = <0x0 0x2010000 0x0 0x1000>;
 		};
 		uart0: serial@3e103000 {
-			compatible = "ns16550a";
+			compatible = "siliconwaves,w3k-uart";
 			reg = <0x0 0x3e103000 0x0 0x1000>;
 			interrupt-parent = <&plic0>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
 			reg-offset = <0x100>;
 			interrupts = <7>;
-			baud = <115200>;
 			clock-frequency = <10000000>;
 			status = "disabled";
 		};
@@ -110,9 +109,54 @@
 			bus-width = <4>;
 			max-frequency = <50000000>;
 			interrupt-parent = <&plic0>;
-			interrupts = <28>;
+			interrupts = <22>;
 			sdhci-caps = <0x0 0x05200000>;
 			cap-mmc-highspeed;
+			status = "disabled";
+		};
+		i2c0: i2c@10030000 {
+			compatible = "siliconwaves,w3k-i2c";
+			reg = <0x0 0x10030000 0x0 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <52>;
+			reg-shift = <2>;
+			reg-io-width = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+		qspi0: spi@10040000 {
+			compatible = "siliconwaves,w3k-qspi";
+			reg = <0x0 0x10040000 0x0 0x1000>,
+			      <0x0 0x20000000 0x0 0x10000000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <41>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+		eth0: ethernet@10090000 {
+			compatible = "siliconwaves,eth";
+			interrupt-parent = <&plic0>;
+			interrupts = <55>;
+			reg = <0x0 0x10090000 0x0 0x2000>,
+			      <0x0 0x100a0000 0x0 0x1000>;
+			local-mac-address = [00 00 00 00 00 00];
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+		gpio: gpio@10060000 {
+			compatible = "siliconwaves,gpio";
+			interrupt-parent = <&plic0>;
+			interrupts = <23>, <24>, <25>, <26>, <27>, <28>, <29>,
+				     <30>, <31>, <32>, <33>, <34>, <35>, <36>,
+				     <37>, <38>;
+			reg = <0x0 0x10060000 0x0 0x1000>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
 			status = "disabled";
 		};
 	};
