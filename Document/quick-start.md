@@ -1,12 +1,20 @@
 # 1. 编译环境
 
+OpenWRT 22.03 with Linux Kernel 5.10.168 在以下两个环境下测试编译过。
+
+## 环境 1
+
 服务器版本：ubuntu 22.04
 
 ```
 Linux super 5.19.0-44-generic #45~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue May 30 20:00:11 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
 ```
 
-ubuntu 22.04 安装必须的软件
+## 环境 2
+
+![](./pictures/ubuntu_20_sys_info.png)
+
+以下是安装必须的软件
 
 ```shell
 sudo apt install cmake autoconf automake autotools-dev curl \
