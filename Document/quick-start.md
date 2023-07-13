@@ -102,6 +102,8 @@ git checkout openwrt-22.03-linux-5.10.168
 选择Yes，将生成.config。
 
 
+确认 Target System 是 Siliconwaves RISC-V 后，选择 Exit 。
+
 
 ## 3.3 提前下载openwrt dl文件
 
