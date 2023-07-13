@@ -78,13 +78,12 @@ git checkout openwrt-22.03-linux-5.10.168
 
 ## 3.2 选择siliconwaves-riscv平台
 
-当执行make menuconfig后，出现默认的配置
+当执行make menuconfig后，出现默认的配置，Target System 选择回车
 
 ![](./pictures/default.png)
 
 
-
-Target System 选择回车，然后目录走到Siliconwaves RISC-V，空格选择
+然后目录走到Siliconwaves RISC-V，空格选择
 
 ![](./pictures/target-system-riscv.png)
 
