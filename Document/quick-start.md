@@ -19,7 +19,7 @@ Note: 以下编译流程需要个人 Github 帐户， 并已设置 [Github SSH K
 
 # 1. 编译环境
 
-编译 OpenWRT 22.03 with Linux Kernel 5.10.168 流程在以下两个环境下测试过。
+OpenWRT 22.03 with Linux Kernel 5.10.168 编译流程在以下两个环境下测试过。
 
 ## 环境 1
 
