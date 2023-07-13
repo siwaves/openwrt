@@ -89,7 +89,7 @@ git checkout openwrt-22.03-linux-5.10.168
 
 
 
-选择好**Siliconwaves RISC-V** 之后，
+选择好**Siliconwaves RISC-V** 之后，选择 Save 回车
 
 ![](./pictures/select-riscv-siliconwaves.png)
 
