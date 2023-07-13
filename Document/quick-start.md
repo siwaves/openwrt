@@ -84,7 +84,7 @@ git checkout openwrt-22.03-linux-5.10.168
 
 
 
-Target System 选择Siliconwaves RISC-V
+Target System 选择回车，然后目录走到Siliconwaves RISC-V，空格选择
 
 ![](./pictures/target-system-riscv.png)
 
