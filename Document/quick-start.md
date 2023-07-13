@@ -31,6 +31,8 @@ Linux super 5.19.0-44-generic #45~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue May 30 
 
 ## 环境 2
 
+Ubuntu 20 工作站 with 以下软硬件配置：
+
 ![](./pictures/ubuntu_20_sys_info.png)
 
 ## 软件依赖
