@@ -1,6 +1,27 @@
+
+
+# 0. 代码库
+
+![](./pictures/ubuntu_20_sys_info.png)
+
+相关代码库已从 Github 开源代码库 Fork 出来，参考下表
+
+| 代码库地址 | 分支 |
+|-----------|------|
+| [openwrt](https://github.com/siwaves/openwrt/) | [openwrt-22.03-linux-5.10.168](https://github.com/siwaves/openwrt/tree/openwrt-22.03-linux-5.10.168) |
+| [luci](https://github.com/siwaves/luci) | [openwrt-22.03](https://github.com/siwaves/luci/tree/openwrt-22.03)  |
+| [u-boot](https://github.com/siwaves/u-boot) | [w3k-fpga](https://github.com/siwaves/u-boot/tree/w3k-fpga) |
+| [packages](https://github.com/siwaves/packages) | [openwrt-22.03](https://github.com/siwaves/packages/tree/openwrt-22.03) |
+| [opensbi](https://github.com/siwaves/opensbi) | [w3k](https://github.com/siwaves/opensbi/tree/w3k) |
+| [telephony](https://github.com/siwaves/telephony) | [openwrt-22.03](https://github.com/siwaves/telephony/tree/openwrt-22.03) |
+| [routing](https://github.com/siwaves/routing) | [openwrt-22.03](https://github.com/siwaves/routing/tree/openwrt-22.03) |
+
+
+Note: 以下编译流程需要个人 Github 帐户， 并已设置 [Github SSH Key Access](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent)。
+
 # 1. 编译环境
 
-OpenWRT 22.03 with Linux Kernel 5.10.168 在以下两个环境下测试编译过。
+编译 OpenWRT 22.03 with Linux Kernel 5.10.168 流程在以下两个环境下测试过。
 
 ## 环境 1
 
@@ -14,7 +35,9 @@ Linux super 5.19.0-44-generic #45~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue May 30 
 
 ![](./pictures/ubuntu_20_sys_info.png)
 
-以下是安装必须的软件
+## 软件依赖
+
+安装必须的软件包
 
 ```shell
 sudo apt install cmake autoconf automake autotools-dev curl \
@@ -31,8 +54,6 @@ python安装
 pip3 install swig
 pip3 install pylibfdt
 ```
-
-
 
 # 2. 克隆代码
 
