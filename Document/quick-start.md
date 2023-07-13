@@ -137,3 +137,5 @@ make V=s -j72
 
 
 编译成功后，在 bin/targets/siliconwaves/w3k/ 目录下会生成 openwrt-siliconwaves-w3k-siliconwaves-w3k-fpga-ext4-factory.img.gz 软件。
+
+作为参考，在环境2下，整个编译过程大概花了25分钟。
