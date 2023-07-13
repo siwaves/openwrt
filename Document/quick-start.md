@@ -2,7 +2,7 @@
 
 # 0. 代码库
 
-![](./pictures/ubuntu_20_sys_info.png)
+![](./pictures/siwave_repos.png)
 
 相关代码库已从 Github 开源代码库 Fork 出来，参考下表
 
