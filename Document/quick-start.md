@@ -136,4 +136,4 @@ make V=s -j72
 
 
 
-编译成功后，在bin/targets/siliconwaves/w3k/目录下会生成openwrt-siliconwaves-w3k-siliconwaves-w3k-fpga-ext4-factory.img.gz 软件。
+编译成功后，在 bin/targets/siliconwaves/w3k/ 目录下会生成 openwrt-siliconwaves-w3k-siliconwaves-w3k-fpga-ext4-factory.img.gz 软件。
