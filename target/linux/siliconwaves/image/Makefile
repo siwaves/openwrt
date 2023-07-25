@@ -43,7 +43,7 @@ endef
 define Device/siliconwaves-w3k-fpga
   DEVICE_MODEL := w3k-fpga
   DEVICE_VARIANT := (64bit)
-  KERNEL_IMG := siliconwaves-fpga-kernel.bin
+  KERNEL_IMG := siliconwaves-w3k-fpga-kernel.bin
   DEVICE_DTS := siliconwaves-w3k-fpga
   IMAGE/sysupgrade.img.gz := boot-common-w3k |  sdcard-img-ext4 | gzip | append-metadata
   IMAGE/factory.img.gz := boot-common-w3k |sdcard-img-ext4 |gzip
