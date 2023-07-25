@@ -1,0 +1,42 @@
+From 72d395e396048e5adcd9eaaa0207442753f3f63d Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Tue, 25 Jul 2023 17:14:40 +0800
+Subject: [PATCH] siliconwaves w3k uart driver
+
+---
+ drivers/tty/serial/8250/8250_of.c | 2 ++
+ drivers/tty/serial/serial_core.c  | 4 ++++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/drivers/tty/serial/8250/8250_of.c b/drivers/tty/serial/8250/8250_of.c
+index 5595c63c4..0b780e97a 100644
+--- a/drivers/tty/serial/8250/8250_of.c
++++ b/drivers/tty/serial/8250/8250_of.c
+@@ -326,6 +326,8 @@ static const struct of_device_id of_platform_serial_table[] = {
+ 		.data = (void *)PORT_MTK_BTIF, },
+ 	{ .compatible = "mrvl,mmp-uart",
+ 		.data = (void *)PORT_XSCALE, },
++	{ .compatible = "siliconwaves,w3k-uart",
++		.data = (void *)PORT_16550A, },
+ 	{ .compatible = "ti,da830-uart", .data = (void *)PORT_DA830, },
+ 	{ .compatible = "nuvoton,npcm750-uart", .data = (void *)PORT_NPCM, },
+ 	{ /* end of list */ },
+diff --git a/drivers/tty/serial/serial_core.c b/drivers/tty/serial/serial_core.c
+index 40fff3858..6c3b14ef5 100644
+--- a/drivers/tty/serial/serial_core.c
++++ b/drivers/tty/serial/serial_core.c
+@@ -490,7 +490,11 @@ uart_get_divisor(struct uart_port *port, unsigned int baud)
+ 	if (baud == 38400 && (port->flags & UPF_SPD_MASK) == UPF_SPD_CUST)
+ 		quot = port->custom_divisor;
+ 	else
++#ifdef CONFIG_SOC_SILICONWAVES
++		quot = DIV_ROUND_CLOSEST(port->uartclk, baud);
++#else
+ 		quot = DIV_ROUND_CLOSEST(port->uartclk, 16 * baud);
++#endif
+ 
+ 	return quot;
+ }
+-- 
+2.34.1
+
