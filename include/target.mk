@@ -23,9 +23,7 @@ DEFAULT_PACKAGES:=\
 	netifd \
 	opkg \
 	uci \
-	uclient-fetch \
-	urandom-seed \
-	urngd
+	uclient-fetch 
 
 ifneq ($(CONFIG_SELINUX),)
 DEFAULT_PACKAGES+=busybox-selinux procd-selinux
@@ -54,15 +52,7 @@ DEFAULT_PACKAGES.nas:=\
 # For router targets
 DEFAULT_PACKAGES.router:=\
 	dnsmasq \
-	firewall arptables-legacy ebtables-legacy ip6tables-zz-legacy iptables-zz-legacy \
-	odhcp6c odhcpd-ipv6only \
-	ppp ppp-mod-pppoe \
-	openssh-sftp-server \
-	luci \
-	coremark \
-	coremark kmod-nf-nathelper kmod-nf-nathelper-extra kmod-ipt-raw kmod-tun \
-	iptables-mod-tproxy iptables-mod-extra ipset ip-ful iptables-mod-ipmark \
-	iptables-mod-iprange
+	luci
 
 ifneq ($(DUMP),)
   all: dumpinfo
