@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=opensbi-siliconwaves
-PKG_VERSION:=1.0
+PKG_VERSION:=v1.0
 
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/siwaves/opensbi
-PKG_SOURCE_VERSION:= 2930e03bf088027296f0a67c4a9741c0f50a9edd
-PKG_MIRROR_HASH:=f1b9ea5622902bc4e1247044aa57d28c5fd304ca697ce25b7b469cc74409b386
+PKG_SOURCE_URL:=https://github.com/riscv-software-src/opensbi
+PKG_SOURCE_VERSION:=48f91ee9c960f048c4a7d1da4447d31e04931e38
+PKG_MIRROR_HASH:=f560cbf2104f9326514d6a3eabf7ea1a3aa30ef858a7e5f747e9c0b387ce5e31
 MAKE_PATH:=$(PKG_NAME)
 
 include $(INCLUDE_DIR)/package.mk
@@ -21,8 +21,8 @@ include $(INCLUDE_DIR)/package.mk
 define Package/$(PKG_NAME)
     SECTION:=boot
     CATEGORY:=Boot Loaders
-    TITLE:=RISC-V OpenSBI For SiliconWaves w3k Soc
-    DEPENDS:=@TARGET_siliconwaves_w3k
+    TITLE:=OpenSBI for siliconWaves w3k Soc
+    DEPENDS:=@TARGET_siliconwaves
 endef
 
 #define Build/Prepare

@@ -1,0 +1,2644 @@
+From 39955e4642cdece2859e245eb1b8b998ba03524d Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Tue, 25 Jul 2023 13:31:32 +0800
+Subject: [PATCH] support siliconwaves w3k fpga board
+
+---
+ arch/riscv/Kconfig                           |   11 +
+ arch/riscv/cpu/wave3000/Kconfig              |   39 +
+ arch/riscv/cpu/wave3000/Makefile             |   11 +
+ arch/riscv/cpu/wave3000/cpu.c                |   22 +
+ arch/riscv/cpu/wave3000/dram.c               |   38 +
+ arch/riscv/cpu/wave3000/spl.c                |   38 +
+ arch/riscv/dts/Makefile                      |    2 +-
+ arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi |   21 +
+ arch/riscv/dts/siliconwaves-fpga.dts         |   47 +
+ arch/riscv/dts/wave3000-u-boot.dtsi          |   47 +
+ arch/riscv/dts/wave3000.dtsi                 |  118 ++
+ arch/riscv/include/asm/arch-wave3000/clk.h   |   14 +
+ arch/riscv/include/asm/arch-wave3000/sdhci.h |  413 +++++++
+ arch/riscv/include/asm/arch-wave3000/spl.h   |   14 +
+ arch/riscv/lib/Makefile                      |    1 +
+ arch/riscv/lib/siliconwaves_cache.c          |   27 +
+ board/siliconwaves/fpga/Kconfig              |   45 +
+ board/siliconwaves/fpga/MAINTAINERS          |    6 +
+ board/siliconwaves/fpga/Makefile             |    9 +
+ board/siliconwaves/fpga/fpga.c               |   31 +
+ board/siliconwaves/fpga/spl.c                |   36 +
+ configs/siliconwaves_fpga_defconfig          |   52 +
+ drivers/cache/Kconfig                        |    7 +
+ drivers/cache/Makefile                       |    1 +
+ drivers/cache/cache-siliconwaves-ccache.c    |   73 ++
+ drivers/mmc/Kconfig                          |    6 +
+ drivers/mmc/Makefile                         |    1 +
+ drivers/mmc/w3k_sdhci.c                      | 1115 ++++++++++++++++++
+ drivers/serial/ns16550.c                     |   31 +-
+ include/configs/siliconwaves-fpga.h          |   49 +
+ 30 files changed, 2320 insertions(+), 5 deletions(-)
+ create mode 100644 arch/riscv/cpu/wave3000/Kconfig
+ create mode 100644 arch/riscv/cpu/wave3000/Makefile
+ create mode 100644 arch/riscv/cpu/wave3000/cpu.c
+ create mode 100644 arch/riscv/cpu/wave3000/dram.c
+ create mode 100644 arch/riscv/cpu/wave3000/spl.c
+ create mode 100644 arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi
+ create mode 100644 arch/riscv/dts/siliconwaves-fpga.dts
+ create mode 100644 arch/riscv/dts/wave3000-u-boot.dtsi
+ create mode 100644 arch/riscv/dts/wave3000.dtsi
+ create mode 100644 arch/riscv/include/asm/arch-wave3000/clk.h
+ create mode 100644 arch/riscv/include/asm/arch-wave3000/sdhci.h
+ create mode 100644 arch/riscv/include/asm/arch-wave3000/spl.h
+ create mode 100644 arch/riscv/lib/siliconwaves_cache.c
+ create mode 100644 board/siliconwaves/fpga/Kconfig
+ create mode 100644 board/siliconwaves/fpga/MAINTAINERS
+ create mode 100644 board/siliconwaves/fpga/Makefile
+ create mode 100644 board/siliconwaves/fpga/fpga.c
+ create mode 100644 board/siliconwaves/fpga/spl.c
+ create mode 100644 configs/siliconwaves_fpga_defconfig
+ create mode 100644 drivers/cache/cache-siliconwaves-ccache.c
+ create mode 100644 drivers/mmc/w3k_sdhci.c
+ create mode 100644 include/configs/siliconwaves-fpga.h
+
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index ebc4bef220..cee0bb8ff9 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -31,6 +31,10 @@ config TARGET_SIPEED_MAIX
+ config TARGET_OPENPITON_RISCV64
+ 	bool "Support RISC-V cores on OpenPiton SoC"
+ 
++config TARGET_SILICONWAVES_FPGA
++	bool "Support Siliconwaves FPGA Board"
++	select SYS_CACHE_SHIFT_6
++
+ endchoice
+ 
+ config SYS_ICACHE_OFF
+@@ -65,11 +69,13 @@ source "board/sifive/unleashed/Kconfig"
+ source "board/sifive/unmatched/Kconfig"
+ source "board/openpiton/riscv64/Kconfig"
+ source "board/sipeed/maix/Kconfig"
++source "board/siliconwaves/fpga/Kconfig"
+ 
+ # platform-specific options below
+ source "arch/riscv/cpu/ax25/Kconfig"
+ source "arch/riscv/cpu/fu540/Kconfig"
+ source "arch/riscv/cpu/fu740/Kconfig"
++source "arch/riscv/cpu/wave3000/Kconfig"
+ source "arch/riscv/cpu/generic/Kconfig"
+ 
+ # architecture-specific options below
+@@ -199,6 +205,11 @@ config SIFIVE_CACHE
+ 	help
+ 	  This enables the operations to configure SiFive cache
+ 
++config SILICONWAVES_CACHE
++	bool
++	help
++	  This enables the operations to configure Siliconwaves cache
++
+ config ANDES_PLICSW
+ 	bool
+ 	depends on RISCV_MMODE || SPL_RISCV_MMODE
+diff --git a/arch/riscv/cpu/wave3000/Kconfig b/arch/riscv/cpu/wave3000/Kconfig
+new file mode 100644
+index 0000000000..6095baa44a
+--- /dev/null
++++ b/arch/riscv/cpu/wave3000/Kconfig
+@@ -0,0 +1,39 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Copyright (C) 2023-2024 Siliconwaves, Inc
++# Richard Dai <richard@siliconwaves.com>
++
++config SILICONWAVES_WAVE3000
++	bool
++	select ARCH_EARLY_INIT_R
++	select RAM
++	select SPL_RAM if SPL
++	imply CPU
++	imply CPU_RISCV
++	imply RISCV_TIMER if (RISCV_SMODE || SPL_RISCV_SMODE)
++	imply SPL_SIFIVE_CLINT
++	imply CMD_CPU
++	imply SPL_CPU
++	imply SPL_OPENSBI
++	imply SPL_LOAD_FIT
++	imply SILICONWAVES_CACHE
++	imply SILICONWAVES_CCACHE
++	imply SMP
++	imply SPI
++	imply DM_GPIO
++	imply CMD_GPIO
++	imply MMC
++	imply MMC_SDHCI
++
++if ENV_IS_IN_SPI_FLASH
++
++config ENV_OFFSET
++	default 0x505000
++
++config ENV_SIZE
++	default 0x20000
++
++config ENV_SECT_SIZE
++	default 0x10000
++
++endif # ENV_IS_IN_SPI_FLASH
+diff --git a/arch/riscv/cpu/wave3000/Makefile b/arch/riscv/cpu/wave3000/Makefile
+new file mode 100644
+index 0000000000..1d1ad98ba7
+--- /dev/null
++++ b/arch/riscv/cpu/wave3000/Makefile
+@@ -0,0 +1,11 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Copyright (C) 2020-2021 SiFive, Inc
++# Pragnesh Patel <pragnesh.patel@sifive.com>
++
++ifeq ($(CONFIG_SPL_BUILD),y)
++obj-y += spl.o
++else
++obj-y += dram.o
++obj-y += cpu.o
++endif
+diff --git a/arch/riscv/cpu/wave3000/cpu.c b/arch/riscv/cpu/wave3000/cpu.c
+new file mode 100644
+index 0000000000..f13c18942f
+--- /dev/null
++++ b/arch/riscv/cpu/wave3000/cpu.c
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2018, Bin Meng <bmeng.cn@gmail.com>
++ */
++
++#include <irq_func.h>
++#include <asm/cache.h>
++
++/*
++ * cleanup_before_linux() is called just before we call linux
++ * it prepares the processor for linux
++ *
++ * we disable interrupt and caches.
++ */
++int cleanup_before_linux(void)
++{
++	disable_interrupts();
++
++	cache_flush();
++
++	return 0;
++}
+diff --git a/arch/riscv/cpu/wave3000/dram.c b/arch/riscv/cpu/wave3000/dram.c
+new file mode 100644
+index 0000000000..d6d4a41d25
+--- /dev/null
++++ b/arch/riscv/cpu/wave3000/dram.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2018, Bin Meng <bmeng.cn@gmail.com>
++ */
++
++#include <common.h>
++#include <fdtdec.h>
++#include <init.h>
++#include <linux/sizes.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++int dram_init(void)
++{
++	return fdtdec_setup_mem_size_base();
++}
++
++int dram_init_banksize(void)
++{
++	return fdtdec_setup_memory_banksize();
++}
++
++phys_size_t board_get_usable_ram_top(phys_size_t total_size)
++{
++#ifdef CONFIG_64BIT
++	/*
++	 * Ensure that we run from first 4GB so that all
++	 * addresses used by U-Boot are 32bit addresses.
++	 *
++	 * This in-turn ensures that 32bit DMA capable
++	 * devices work fine because DMA mapping APIs will
++	 * provide 32bit DMA addresses only.
++	 */
++	if (gd->ram_top > SZ_4G)
++		return SZ_4G;
++#endif
++	return gd->ram_top;
++}
+diff --git a/arch/riscv/cpu/wave3000/spl.c b/arch/riscv/cpu/wave3000/spl.c
+new file mode 100644
+index 0000000000..c6816e9ed4
+--- /dev/null
++++ b/arch/riscv/cpu/wave3000/spl.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2020-2021 SiFive, Inc
++ * Pragnesh Patel <pragnesh.patel@sifive.com>
++ */
++
++#include <dm.h>
++#include <log.h>
++#include <asm/csr.h>
++
++#define CSR_U74_FEATURE_DISABLE	0x7c1
++
++int spl_soc_init(void)
++{
++	int ret;
++	struct udevice *dev;
++
++	/* DDR init */
++	ret = uclass_get_device(UCLASS_RAM, 0, &dev);
++	if (ret) {
++		debug("DRAM init failed: %d\n", ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++void harts_early_init(void)
++{
++	/*
++	 * Feature Disable CSR
++	 *
++	 * Clear feature disable CSR to '0' to turn on all features for
++	 * each core. This operation must be in M-mode.
++	 */
++	if (CONFIG_IS_ENABLED(RISCV_MMODE))
++		csr_write(CSR_U74_FEATURE_DISABLE, 0);
++}
+diff --git a/arch/riscv/dts/Makefile b/arch/riscv/dts/Makefile
+index 5c15a0f303..a9b0de7169 100644
+--- a/arch/riscv/dts/Makefile
++++ b/arch/riscv/dts/Makefile
+@@ -7,7 +7,7 @@ dtb-$(CONFIG_TARGET_OPENPITON_RISCV64) += openpiton-riscv64.dtb
+ dtb-$(CONFIG_TARGET_SIFIVE_UNLEASHED) += hifive-unleashed-a00.dtb
+ dtb-$(CONFIG_TARGET_SIFIVE_UNMATCHED) += hifive-unmatched-a00.dtb
+ dtb-$(CONFIG_TARGET_SIPEED_MAIX) += k210-maix-bit.dtb
+-
++dtb-$(CONFIG_TARGET_SILICONWAVES_FPGA) += siliconwaves-fpga.dtb
+ include $(srctree)/scripts/Makefile.dts
+ 
+ targets += $(dtb-y)
+diff --git a/arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi b/arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi
+new file mode 100644
+index 0000000000..3c1f6b286a
+--- /dev/null
++++ b/arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: (GPL-2.0 OR MIT)
++/*
++ * Copyright (C) 2023-2024 Siliconwaves, Inc
++ */
++
++#include "binman.dtsi"
++#include "wave3000-u-boot.dtsi"
++/ {
++	memory@80000000 {
++		u-boot,dm-spl;
++	};
++
++	rtcclk {
++		u-boot,dm-spl;
++	};
++
++};
++
++&clint {
++	clocks = <&rtcclk>;
++};
+diff --git a/arch/riscv/dts/siliconwaves-fpga.dts b/arch/riscv/dts/siliconwaves-fpga.dts
+new file mode 100644
+index 0000000000..15703c5dd9
+--- /dev/null
++++ b/arch/riscv/dts/siliconwaves-fpga.dts
+@@ -0,0 +1,47 @@
++// SPDX-License-Identifier: GPL-2.0+
++/* Copyright (c) 2023-2024 Siliconwaves, Inc */
++
++#include "wave3000.dtsi"
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++
++/* Clock frequency (in Hz) of the PCB crystal for rtcclk */
++#define RTCCLK_FREQ		5000000
++
++/ {
++	#address-cells = <2>;
++	#size-cells = <2>;
++	model = "Siliconwaves w3k fpag board";
++	compatible = "siliconwaves,w3k-fpga";
++
++	chosen {
++		stdout-path = "serial0";
++	};
++
++	cpus {
++		timebase-frequency = <RTCCLK_FREQ>;
++	};
++
++	memory@80000000 {
++		device_type = "memory";
++		reg = <0x0 0x80000000 0x0 0x80000000>;
++	};
++
++	soc {
++	};
++
++	rtcclk: rtcclk {
++		#clock-cells = <0>;
++		compatible = "fixed-clock";
++		clock-frequency = <RTCCLK_FREQ>;
++		clock-output-names = "rtcclk";
++	};
++};
++
++&uart0 {
++	status = "okay";
++};
++
++&sdhci0{
++	status = "okay";
++};
+diff --git a/arch/riscv/dts/wave3000-u-boot.dtsi b/arch/riscv/dts/wave3000-u-boot.dtsi
+new file mode 100644
+index 0000000000..bbe1a9bff0
+--- /dev/null
++++ b/arch/riscv/dts/wave3000-u-boot.dtsi
+@@ -0,0 +1,47 @@
++// SPDX-License-Identifier: (GPL-2.0 OR MIT)
++/*
++ * (C) Copyright 2023-2024 Siliconwaves, Inc
++ */
++
++/ {
++	cpus {
++		u-boot,dm-spl;
++		cpu0: cpu@0 {
++			u-boot,dm-spl;
++			status = "okay";
++			cpu0_intc: interrupt-controller {
++				u-boot,dm-spl;
++			};
++		};
++		cpu1: cpu@1 {
++			u-boot,dm-spl;
++			status = "okay";
++			cpu1_intc: interrupt-controller {
++				u-boot,dm-spl;
++			};
++		};
++	};
++
++	soc {
++		u-boot,dm-spl;
++		clint: clint@2000000 {
++			compatible = "riscv,clint0";
++			interrupts-extended = <&cpu0_intc 3 &cpu0_intc 7
++					       &cpu1_intc 3 &cpu1_intc 7 >;
++			reg = <0x0 0x2000000 0x0 0x10000>;
++			u-boot,dm-spl;
++		};
++	};
++};
++
++&uart0 {
++	u-boot,dm-spl;
++};
++
++&sdhci0 {
++	u-boot,dm-spl;
++};
++
++&ccache {
++	status = "okay";
++};
+diff --git a/arch/riscv/dts/wave3000.dtsi b/arch/riscv/dts/wave3000.dtsi
+new file mode 100644
+index 0000000000..7cad266427
+--- /dev/null
++++ b/arch/riscv/dts/wave3000.dtsi
+@@ -0,0 +1,118 @@
++// SPDX-License-Identifier: (GPL-2.0 OR MIT)
++/* Copyright (c) 2023-2024 Siliconwaves, Inc */
++
++/dts-v1/;
++/ {
++	#address-cells = <2>;
++	#size-cells = <2>;
++	compatible = "siliconwaves,w3k-fpga";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++	};
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++		cpu0: cpu@0 {
++			compatible = "siliconwaves,bullet0", "riscv";
++			d-cache-block-size = <64>;
++			d-cache-sets = <128>;
++			d-cache-size = <32768>;
++			d-tlb-sets = <1>;
++			d-tlb-size = <40>;
++			device_type = "cpu";
++			i-cache-block-size = <64>;
++			i-cache-sets = <2>;
++			i-cache-size = <32768>;
++			i-tlb-sets = <1>;
++			i-tlb-size = <40>;
++			mmu-type = "riscv,sv39";
++			next-level-cache = <&ccache>;
++			reg = <0x0>;
++			riscv,isa = "rv64imafdc";
++			tlb-split;
++			cpu0_intc: interrupt-controller {
++				#interrupt-cells = <1>;
++				compatible = "riscv,cpu-intc";
++				interrupt-controller;
++			};
++		};
++		cpu1: cpu@1 {
++			compatible = "siliconwaves,bullet0", "riscv";
++			d-cache-block-size = <64>;
++			d-cache-sets = <128>;
++			d-cache-size = <32768>;
++			d-tlb-sets = <1>;
++			d-tlb-size = <40>;
++			device_type = "cpu";
++			i-cache-block-size = <64>;
++			i-cache-sets = <2>;
++			i-cache-size = <32768>;
++			i-tlb-sets = <1>;
++			i-tlb-size = <40>;
++			mmu-type = "riscv,sv39";
++			next-level-cache = <&ccache>;
++			reg = <0x1>;
++			riscv,isa = "rv64imafdc";
++			tlb-split;
++			cpu1_intc: interrupt-controller {
++				#interrupt-cells = <1>;
++				compatible = "riscv,cpu-intc";
++				interrupt-controller;
++			};
++		};
++	};
++	soc {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		compatible = "siliconwaves,w3k", "simple-bus";
++		ranges;
++		plic0: interrupt-controller@c000000 {
++			#interrupt-cells = <1>;
++			compatible = "siliconwaves,w3k-plic";
++			reg = <0x0 0xc000000 0x0 0x4000000>;
++			riscv,ndev = <69>;
++			interrupt-controller;
++			interrupts-extended = <
++				&cpu0_intc 0xffffffff &cpu0_intc 9
++				&cpu1_intc 0xffffffff &cpu1_intc 9>;
++		};
++		ccache: cache-controller@2010000 {
++			compatible = "siliconwaves,w3k-ccache", "cache";
++			cache-block-size = <64>;
++			cache-level = <2>;
++			cache-sets = <256>;
++			cache-size = <262144>;
++			cache-unified;
++			interrupt-parent = <&plic0>;
++			interrupts = <19 21 22 20>;
++			reg = <0x0 0x2010000 0x0 0x1000>;
++		};
++		uart0: serial@3e103000 {
++			compatible = "siliconwaves,w3k-uart";
++			reg = <0x0 0x3e103000 0x0 0x1000>;
++			interrupt-parent = <&plic0>;
++			reg-shift = <2>;
++			reg-io-width = <4>;
++			reg-offset = <0x100>;
++			interrupts = <18>;
++			clock-frequency = <10000000>;
++			status = "disabled";
++		};
++		sdhci0: sdhci@3e101000 {
++			compatible = "siliconwaves,w3k-sdhci";
++			reg = <0x0 0x3e101000 0x0 0x1000>;
++			bus-width = <4>;
++			max-frequency = <50000000>;
++			interrupt-parent = <&plic0>;
++			interrupts = <28>;
++			sdhci-caps = <0x0 0x05200000>;
++			cap-mmc-highspeed;
++			status = "disabled";
++		};
++	};
++};
+diff --git a/arch/riscv/include/asm/arch-wave3000/clk.h b/arch/riscv/include/asm/arch-wave3000/clk.h
+new file mode 100644
+index 0000000000..02a8fdf229
+--- /dev/null
++++ b/arch/riscv/include/asm/arch-wave3000/clk.h
+@@ -0,0 +1,14 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (c) 2023-2024 Siliconwaves Inc
++ *
++ * Authors:
++ *   Richard Dai <richard@siliconwaves.com>
++ */
++
++#ifndef __CLK_SILICONWAVES_H
++#define __CLK_SILICONWAVES_H
++
++/* Note: This is a placeholder header for driver compilation. */
++
++#endif
+diff --git a/arch/riscv/include/asm/arch-wave3000/sdhci.h b/arch/riscv/include/asm/arch-wave3000/sdhci.h
+new file mode 100644
+index 0000000000..e0fd8619b1
+--- /dev/null
++++ b/arch/riscv/include/asm/arch-wave3000/sdhci.h
+@@ -0,0 +1,413 @@
++/*
++ * Copyright 2011, Marvell Semiconductor Inc.
++ * Lei Wen <leiwen@marvell.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ *
++ * Back ported to the 8xx platform (from the 8260 platform) by
++ * Murray.Jensen@cmst.csiro.au, 27-Jan-01.
++ */
++#ifndef __SDHCI_HW_H
++#define __SDHCI_HW_H
++
++#include <asm/io.h>
++#include <mmc.h>
++#include <fdtdec.h>
++
++/*
++ * Controller registers
++ */
++
++#define ANARION_MMC_HOST
++
++#define SDHCI_DMA_ADDRESS	0x00
++
++#define SDHCI_BLOCK_SIZE	0x04
++#define SDHCI_LAT_REG		0x04
++#define  SDHCI_MAKE_BLKSZ(dma, blksz) (((dma & 0x7) << 12) | (blksz & 0xFFF))
++
++#define SDHCI_BLOCK_COUNT	0x34
++
++#define SDHCI_ARGUMENT		0x1C
++
++#define SDHCI_TRANSFER_MODE	0x0C
++#define  SDHCI_TRNS_DMA		0x01
++#define  SDHCI_TRNS_BLK_CNT_EN	0x02
++#define  SDHCI_TRNS_ACMD12	0x04
++#define  SDHCI_TRNS_READ	0x10
++#define  SDHCI_TRNS_MULTI	0x20
++
++#define SDHCI_COMMAND		0x18
++#define  SDHCI_CMD_RESP_MASK	0x03
++#define  SDHCI_CMD_CRC		0x08
++#define  SDHCI_CMD_INDEX	0x10
++#define  SDHCI_CMD_DATA		0x20
++#define  SDHCI_CMD_ABORTCMD	0xC0
++
++/* SDMMC_CMD bit fields */
++#define  SD_RESP_NO	0x0	/* no response */
++#define  SD_RESP_R1	0x1	/* R1/R5/R6/R7,R48-count */
++#define  SD_RESP_R2	0x2	/* R2, R136-count */
++#define  SD_RESP_R3	0x3	/* R3, R48 */
++#define  SD_RESP_R4	0x4	/* R4, R48 */
++#define  SD_RESP_R1B	0x7	/* R1b */
++
++#define  SDHCI_CMD_RESP_NONE	0x00
++#define  SDHCI_CMD_RESP_LONG	0x01
++#define  SDHCI_CMD_RESP_SHORT	0x02
++#define  SDHCI_CMD_RESP_SHORT_BUSY 0x03
++
++#define SDHCI_MAKE_CMD(c, f) ((c & 0x3f) | ((f & 0x7) << 7))
++#define SDHCI_GET_CMD(c) (c & 0x3f)
++
++#define SDHCI_RESPONSE		0x24
++
++#define SDHCI_BUFFER		0x20
++#define SDHCI_STA_REG		0x20
++
++#define SDHCI_PRESENT_STATE	0x24
++#define  SDHCI_CMD_INHIBIT	0x00000001
++#define  SDHCI_DATA_INHIBIT	0x00000002
++#define  SDHCI_DOING_WRITE	0x00000100
++#define  SDHCI_DOING_READ	0x00000200
++#define  SDHCI_SPACE_AVAILABLE	0x00000400
++#define  SDHCI_DATA_AVAILABLE	0x00000800
++#define  SDHCI_CARD_PRESENT	0x00010000
++#define  SDHCI_CARD_STATE_STABLE	0x00020000
++#define  SDHCI_CARD_DETECT_PIN_LEVEL	0x00040000
++#define  SDHCI_WRITE_PROTECT	0x00080000
++
++#define SDHCI_HOST_CONTROL	0x14
++#define  SDHCI_CTRL_BITBUS_MASK	0x00030000
++#define  SDHCI_CTRL_4BITBUS	0x00010000
++#define  SDHCI_CTRL_8BITBUS	0x00020000
++#define  SDHCI_CTRL_LED		0x01
++//#define  SDHCI_CTRL_4BITBUS	0x02
++#define  SDHCI_CTRL_HISPD	0x04
++#define  SDHCI_CTRL_DMA_MASK	0x18
++#define   SDHCI_CTRL_SDMA	0x00
++#define   SDHCI_CTRL_ADMA1	0x08
++#define   SDHCI_CTRL_ADMA32	0x10
++#define   SDHCI_CTRL_ADMA64	0x18
++//#define  SDHCI_CTRL_8BITBUS	0x20
++#define  SDHCI_CTRL_CD_TEST_INS	0x40
++#define  SDHCI_CTRL_CD_TEST	0x80
++
++#define SDHCI_POWER_CONTROL	0x00
++#define  SDHCI_POWER_ON		0x10
++#define  SDHCI_POWER_180	0x0A
++#define  SDHCI_POWER_300	0x0C
++#define  SDHCI_POWER_330	0x0E
++
++#define SDHCI_BLOCK_GAP_CONTROL	0x2A
++
++#define SDHCI_WAKE_UP_CONTROL	0x2B
++#define  SDHCI_WAKE_ON_INT	0x01
++#define  SDHCI_WAKE_ON_INSERT	0x02
++#define  SDHCI_WAKE_ON_REMOVE	0x04
++
++#define SDHCI_CLOCK_CONTROL	0x00
++#define  SDHCI_DIVIDER_SHIFT	8
++#define  SDHCI_DIVIDER_HI_SHIFT	6
++#define  SDHCI_DIV_MASK		0x1FFF
++#define  SDHCI_DIV_MASK_LEN	13
++#define  SDHCI_DIV_HI_MASK	0x300
++#define  SDHCI_CLOCK_CARD_EN	0x0004
++#define  SDHCI_CLOCK_INT_STABLE	0x0002
++#define  SDHCI_CLOCK_INT_EN	0x0001
++
++#define SDHCI_TIMEOUT_CONTROL	0x2E
++
++#define SDHCI_SOFTWARE_RESET	0x00
++#define  SDHCI_RESET_ALL	0x04
++
++#define SDHCI_INT_STATUS	0x0C
++#define SDHCI_INT_ENABLE	0x10
++#define SDHCI_SIGNAL_ENABLE	0x38
++#ifndef ANARION_MMC_HOST//infomax, merge from another version
++#define  SDHCI_INT_RESPONSE	0x00000001
++#define  SDHCI_INT_DATA_END	0x00000002
++#define  SDHCI_INT_DMA_END	0x00000008
++#define  SDHCI_INT_SPACE_AVAIL	0x00000010
++#define  SDHCI_INT_DATA_AVAIL	0x00000020
++#define  SDHCI_INT_CARD_INSERT	0x00000040
++#define  SDHCI_INT_CARD_REMOVE	0x00000080
++#define  SDHCI_INT_CARD_INT	0x00000100
++#define  SDHCI_INT_ERROR	0x00008000
++#define  SDHCI_INT_TIMEOUT	0x00000200
++#define  SDHCI_INT_CRC		0x00000400
++#define  SDHCI_INT_END_BIT	0x00040000
++#define  SDHCI_INT_INDEX	0x00080000
++#define  SDHCI_INT_DATA_TIMEOUT	0x00004000
++#define  SDHCI_INT_DATA_CRC	0x00008000
++#define  SDHCI_INT_DATA_END_BIT	0x00400000
++#define  SDHCI_INT_BUS_POWER	0x00800000
++#define  SDHCI_INT_ACMD12ERR	0x01000000
++#define  SDHCI_INT_ADMA_ERROR	0x02000000
++#else //ANARION_MMC_HOST
++#define  SDHCI_INT_CARD_INSERT	0x00000002
++#define  SDHCI_INT_CARD_REMOVE	0x00000002
++#define  SDHCI_INT_ACMD_END	0x00000008
++#define  SDHCI_INT_ACMD_TIMEOUT	0x00000010
++#define  SDHCI_INT_ACMD_CRC	0x00000020
++#define  SDHCI_INT_RESPONSE	0x00000100
++#define  SDHCI_INT_TIMEOUT	0x00000200
++#define  SDHCI_INT_CRC		0x00000400
++#define  SDHCI_INT_DATA_END	0x00001000
++#define  SDHCI_INT_DATA_TIMEOUT	0x00004000
++#define  SDHCI_INT_DATA_CRC	0x00008000
++#define  SDHCI_INT_DATA_AVAIL	0x00010000
++#define  SDHCI_INT_DMA_START	0x00000001
++#define  SDHCI_INT_DMA_END	0x00000002
++#define  SDHCI_INT_ADMA_ERROR	0x00000004
++#define  SDHCI_INT_ADMA_END	0x00000008
++#endif
++#define  SDHCI_INT_NORMAL_MASK	0x00007FFF
++#define  SDHCI_INT_ERROR_MASK	0xFFFF8000
++
++/*
++#define  SDHCI_INT_CMD_MASK	(SDHCI_INT_RESPONSE | SDHCI_INT_TIMEOUT | \
++		SDHCI_INT_CRC | SDHCI_INT_END_BIT | SDHCI_INT_INDEX)
++#define  SDHCI_INT_DATA_MASK	(SDHCI_INT_DATA_END | SDHCI_INT_DMA_END | \
++		SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL | \
++		SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_DATA_CRC | \
++		SDHCI_INT_DATA_END_BIT | SDHCI_INT_ADMA_ERROR)
++*/
++#define  SDHCI_INT_CMD_MASK	0x00000700
++#define  SDHCI_INT_DATA_MASK	0x0000D000
++#define SDHCI_INT_ALL_MASK	((unsigned int)-1)
++
++#define  SDHCI_INT_DMA_MASK	(SDHCI_INT_DMA_END | SDHCI_INT_ADMA_ERROR | \
++				 SDHCI_INT_ADMA_END)
++
++#define SDHCI_ACMD12_ERR	0x3C
++
++/* 3E-3F reserved */
++
++#define SDHCI_CAPABILITIES	0x40
++#define  SDHCI_TIMEOUT_CLK_MASK	0x0000003F
++#define  SDHCI_TIMEOUT_CLK_SHIFT 0
++#define  SDHCI_TIMEOUT_CLK_UNIT	0x00000080
++#define  SDHCI_CLOCK_BASE_MASK	0x00003F00
++#define  SDHCI_CLOCK_V3_BASE_MASK	0x0000FF00
++#define  SDHCI_CLOCK_BASE_SHIFT	8
++#define  SDHCI_MAX_BLOCK_MASK	0x00030000
++#define  SDHCI_MAX_BLOCK_SHIFT  16
++#define  SDHCI_CAN_DO_8BIT	0x00040000
++#define  SDHCI_CAN_DO_ADMA2	0x00080000
++#define  SDHCI_CAN_DO_ADMA1	0x00100000
++#define  SDHCI_CAN_DO_HISPD	0x00200000
++#define  SDHCI_CAN_DO_SDMA	0x00400000
++#define  SDHCI_CAN_VDD_330	0x01000000
++#define  SDHCI_CAN_VDD_300	0x02000000
++#define  SDHCI_CAN_VDD_180	0x04000000
++#define  SDHCI_CAN_64BIT	0x10000000
++
++#define SDHCI_CAPABILITIES_1	0x44
++
++#define SDHCI_MAX_CURRENT	0x48
++
++/* 4C-4F reserved for more max current */
++
++#define SDHCI_SET_ACMD12_ERROR	0x50
++#define SDHCI_SET_INT_ERROR	0x52
++
++#define SDHCI_ADMA_ERROR	0x54
++
++/* 55-57 reserved */
++
++#define SDHCI_PCH1_REG		0x5C
++#define SDHCI_ACMD_REG		0x6C
++#define SDHCI_ATRG_REG		0x70
++#define SDHCI_KDL_REG		0x74
++#define SDHCI_DLL_REG		0x88
++#define SDHCI_ODL_REG		0x8C
++
++#define SDHCI_ADMA_ADDRESS	0x10C
++
++/* 60-FB reserved */
++
++#define SDHCI_SLOT_INT_STATUS	0xFC
++
++#define SDHCI_HOST_VERSION	0xFE
++#define  SDHCI_VENDOR_VER_MASK	0xFF00
++#define  SDHCI_VENDOR_VER_SHIFT	8
++#define  SDHCI_SPEC_VER_MASK	0x00FF
++#define  SDHCI_SPEC_VER_SHIFT	0
++#define   SDHCI_SPEC_100	0
++#define   SDHCI_SPEC_200	1
++#define   SDHCI_SPEC_300	2
++
++#define SDHCI_GET_VERSION(x) (x->version & SDHCI_SPEC_VER_MASK)
++
++#define SDHCI_SDMA_SADDR	0x0100
++#define SDHCI_SDMA_LEN		0x0104
++#define SDHCI_DMA_CTL		0x0108
++#define SDHCI_DMA_STATUS	0x0110
++
++#define  MMC_IRQ	0x00000001	/* MMC interrupt event */
++
++#define  ACMD_DONE	0x00000008	/* auto command done */
++#define  ACMD_TIMEOUT	0x00000010	/* auto command timeout */
++#define  ACMD_CRC_ERROR	0x00000020	/* auto command crc error */	
++
++#define  SDIO_IRQ	0x00000080	/* SDIO irq */
++#define  CMD_DONE	0x00000100	/* command done */
++#define  CMD_TIMEOUT	0x00000200	/* command timeout */
++#define  CMD_CRC_ERROR	0x00000400	/* command crc error */
++#define  CST_INT	0x00000800
++#define  DAT_DONE	0x00001000	/* data transfer done */
++
++#define  DAT_TIMEOUT	0x00004000	/* data timeout */
++#define  DAT_CRC_ERROR	0x00008000	/* data crc error */
++#define  A19_DONE	0x00010000
++
++#define  CMD_INT	0x00000700
++#define  DAT_INT	0x0000D000
++
++
++/*
++ * End of controller registers.
++ */
++
++#define SDHCI_MAX_DIV_SPEC_200	256
++#define SDHCI_MAX_DIV_SPEC_300	2046
++
++/*
++ * quirks
++ */
++#define SDHCI_QUIRK_32BIT_DMA_ADDR	(1 << 0)
++#define SDHCI_QUIRK_REG32_RW		(1 << 1)
++#define SDHCI_QUIRK_BROKEN_R1B		(1 << 2)
++#define SDHCI_QUIRK_NO_HISPD_BIT	(1 << 3)
++#define SDHCI_QUIRK_BROKEN_VOLTAGE	(1 << 4)
++#define SDHCI_QUIRK_NO_CD		(1 << 5)
++#define SDHCI_QUIRK_WAIT_SEND_CMD	(1 << 6)
++#define SDHCI_QUIRK_NO_SIMULT_VDD_AND_POWER (1 << 7)
++#define SDHCI_QUIRK_USE_WIDE8		(1 << 8)
++
++/* to make gcc happy */
++struct sdhci_host;
++
++/*
++ * Host SDMA buffer boundary. Valid values from 4K to 512K in powers of 2.
++ */
++#define SDHCI_DEFAULT_BOUNDARY_SIZE	(512 * 1024)
++#define SDHCI_DEFAULT_BOUNDARY_ARG	(7)
++struct sdhci_ops {
++#ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
++	u32             (*read_l)(struct sdhci_host *host, int reg);
++	u16             (*read_w)(struct sdhci_host *host, int reg);
++	u8              (*read_b)(struct sdhci_host *host, int reg);
++	void            (*write_l)(struct sdhci_host *host, u32 val, int reg);
++	void            (*write_w)(struct sdhci_host *host, u16 val, int reg);
++	void            (*write_b)(struct sdhci_host *host, u8 val, int reg);
++#endif
++};
++
++struct sdhci_host {
++	char *name;
++	void *ioaddr;
++	unsigned int quirks;
++	unsigned int host_caps;
++	unsigned int version;
++	unsigned int clock;
++	struct mmc *mmc;
++	const struct sdhci_ops *ops;
++	int index;
++
++	int bus_width;
++////	struct fdt_gpio_state pwr_gpio;	/* Power GPIO */
++	////struct fdt_gpio_state cd_gpio;		/* Card Detect GPIO */
++
++	void (*set_control_reg)(struct sdhci_host *host);
++	void (*set_clock)(int dev_index, unsigned int div);
++	uint	voltages;
++
++	struct mmc_config cfg;
++};
++
++#ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
++
++static inline void sdhci_writel(struct sdhci_host *host, u32 val, int reg)
++{
++	if (unlikely(host->ops->write_l))
++		host->ops->write_l(host, val, reg);
++	else
++		writel(val, host->ioaddr + reg);
++}
++
++static inline void sdhci_writew(struct sdhci_host *host, u16 val, int reg)
++{
++	if (unlikely(host->ops->write_w))
++		host->ops->write_w(host, val, reg);
++	else
++		writew(val, host->ioaddr + reg);
++}
++
++static inline void sdhci_writeb(struct sdhci_host *host, u8 val, int reg)
++{
++	if (unlikely(host->ops->write_b))
++		host->ops->write_b(host, val, reg);
++	else
++		writeb(val, host->ioaddr + reg);
++}
++
++static inline u32 sdhci_readl(struct sdhci_host *host, int reg)
++{
++	if (unlikely(host->ops->read_l))
++		return host->ops->read_l(host, reg);
++	else
++		return readl(host->ioaddr + reg);
++}
++
++static inline u16 sdhci_readw(struct sdhci_host *host, int reg)
++{
++	if (unlikely(host->ops->read_w))
++		return host->ops->read_w(host, reg);
++	else
++		return readw(host->ioaddr + reg);
++}
++
++static inline u8 sdhci_readb(struct sdhci_host *host, int reg)
++{
++	if (unlikely(host->ops->read_b))
++		return host->ops->read_b(host, reg);
++	else
++		return readb(host->ioaddr + reg);
++}
++
++#else
++
++static inline void sdhci_writel(struct sdhci_host *host, u32 val, int reg)
++{
++	writel(val, host->ioaddr + reg);
++}
++
++static inline void sdhci_writew(struct sdhci_host *host, u16 val, int reg)
++{
++	writew(val, host->ioaddr + reg);
++}
++
++static inline void sdhci_writeb(struct sdhci_host *host, u8 val, int reg)
++{
++	writeb(val, host->ioaddr + reg);
++}
++static inline u32 sdhci_readl(struct sdhci_host *host, int reg)
++{
++	return readl(host->ioaddr + reg);
++}
++
++static inline u16 sdhci_readw(struct sdhci_host *host, int reg)
++{
++	return readw(host->ioaddr + reg);
++}
++
++static inline u8 sdhci_readb(struct sdhci_host *host, int reg)
++{
++	return readb(host->ioaddr + reg);
++}
++#endif
++
++int add_sdhci(struct sdhci_host *host, u32 max_clk, u32 min_clk);
++#endif /* __SDHCI_HW_H */
+diff --git a/arch/riscv/include/asm/arch-wave3000/spl.h b/arch/riscv/include/asm/arch-wave3000/spl.h
+new file mode 100644
+index 0000000000..ed0747f6bc
+--- /dev/null
++++ b/arch/riscv/include/asm/arch-wave3000/spl.h
+@@ -0,0 +1,14 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2023-2024 Siliconwaves, Inc.
++ *
++ * Authors:
++ *   Richard Dai <richard@siliconwaves.com>
++ */
++
++#ifndef _SPL_SILICONWAVES_H
++#define _SPL_SILICONWAVES_H
++
++int spl_soc_init(void);
++
++#endif /* _SPL_SILICONWAVES_H */
+diff --git a/arch/riscv/lib/Makefile b/arch/riscv/lib/Makefile
+index e5a81ba722..08e10c04c8 100644
+--- a/arch/riscv/lib/Makefile
++++ b/arch/riscv/lib/Makefile
+@@ -11,6 +11,7 @@ obj-$(CONFIG_CMD_BOOTI) += bootm.o image.o
+ obj-$(CONFIG_CMD_GO) += boot.o
+ obj-y	+= cache.o
+ obj-$(CONFIG_SIFIVE_CACHE) += sifive_cache.o
++obj-$(CONFIG_SILICONWAVES_CACHE) += siliconwaves_cache.o
+ ifeq ($(CONFIG_$(SPL_)RISCV_MMODE),y)
+ obj-$(CONFIG_$(SPL_)SIFIVE_CLINT) += sifive_clint.o
+ obj-$(CONFIG_ANDES_PLICSW) += andes_plicsw.o
+diff --git a/arch/riscv/lib/siliconwaves_cache.c b/arch/riscv/lib/siliconwaves_cache.c
+new file mode 100644
+index 0000000000..db96c4509d
+--- /dev/null
++++ b/arch/riscv/lib/siliconwaves_cache.c
+@@ -0,0 +1,27 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2021 siliconwaves, Inc
++ */
++
++#include <common.h>
++#include <cache.h>
++#include <cpu_func.h>
++#include <dm.h>
++
++void enable_caches(void)
++{
++	struct udevice *dev;
++	int ret;
++
++	/* Enable ways of ccache */
++	ret = uclass_get_device_by_driver(UCLASS_CACHE,
++					  DM_DRIVER_GET(siliconwaves_ccache),
++					  &dev);
++	if (ret) {
++		log_debug("Cannot enable cache ways");
++	} else {
++		ret = cache_enable(dev);
++		if (ret)
++			log_debug("ccache enable failed");
++	}
++}
+diff --git a/board/siliconwaves/fpga/Kconfig b/board/siliconwaves/fpga/Kconfig
+new file mode 100644
+index 0000000000..0dc9157ca3
+--- /dev/null
++++ b/board/siliconwaves/fpga/Kconfig
+@@ -0,0 +1,45 @@
++if TARGET_SILICONWAVES_FPGA
++
++config SYS_BOARD
++	default "fpga"
++
++config SYS_VENDOR
++	default "siliconwaves"
++
++config SYS_CPU
++	default "wave3000"
++
++config SYS_CONFIG_NAME
++	default "siliconwaves-fpga"
++
++config TEXT_BASE
++	default 0x80200000 if SPL
++	default 0x80000000 if !RISCV_SMODE
++	default 0x80200000 if RISCV_SMODE
++
++config SPL_TEXT_BASE
++	default 0x08000000
++
++config SPL_OPENSBI_LOAD_ADDR
++	default 0x80000000
++
++config SYS_INIT_SP_ADDR
++	default 0x80200000
++
++config BOARD_SPECIFIC_OPTIONS # dummy
++	def_bool y
++	select SILICONWAVES_WAVE3000
++	select SUPPORT_SPL
++	select BINMAN
++	imply CMD_MMC
++	imply CMD_DHCP
++	imply CMD_FS_GENERIC
++	imply CMD_NET
++	imply CMD_PING
++	imply CMD_SF
++	imply IP_DYN
++	imply PHY_LIB
++	imply PHY_MSCC
++	imply SILICONWAVES_SDHCI
++	
++endif
+diff --git a/board/siliconwaves/fpga/MAINTAINERS b/board/siliconwaves/fpga/MAINTAINERS
+new file mode 100644
+index 0000000000..7376ec73f8
+--- /dev/null
++++ b/board/siliconwaves/fpga/MAINTAINERS
+@@ -0,0 +1,6 @@
++Siliconwaves w3k FPGA board
++M:	Richard Dai <richard@siliconwaves.com>
++S:	Maintained
++F:	board/siliconwaves/fpga/
++F:	include/configs/siliconwaves-fpga.h
++F:	configs/siliconwaves_fpga_defconfig
+diff --git a/board/siliconwaves/fpga/Makefile b/board/siliconwaves/fpga/Makefile
+new file mode 100644
+index 0000000000..f8c58d9116
+--- /dev/null
++++ b/board/siliconwaves/fpga/Makefile
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Copyright (c) 2023-2024 Siliconwaves, Inc
++
++ifdef CONFIG_SPL_BUILD
++obj-y += spl.o
++else
++obj-y += fpga.o
++endif
+diff --git a/board/siliconwaves/fpga/fpga.c b/board/siliconwaves/fpga/fpga.c
+new file mode 100644
+index 0000000000..6295deeae2
+--- /dev/null
++++ b/board/siliconwaves/fpga/fpga.c
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (c) 2020-2021, SiFive Inc
++ *
++ * Authors:
++ *   Pragnesh Patel <pragnesh.patel@sifive.com>
++ */
++
++#include <common.h>
++#include <cpu_func.h>
++#include <dm.h>
++#include <asm/sections.h>
++
++void *board_fdt_blob_setup(int *err)
++{
++	*err = 0;
++	if (IS_ENABLED(CONFIG_OF_SEPARATE) || IS_ENABLED(CONFIG_OF_BOARD)) {
++		if (gd->arch.firmware_fdt_addr)
++			return (ulong *)(uintptr_t)gd->arch.firmware_fdt_addr;
++	}
++
++	return (ulong *)&_end;
++}
++
++int board_init(void)
++{
++	/* enable all cache ways */
++	enable_caches();
++
++	return 0;
++}
+diff --git a/board/siliconwaves/fpga/spl.c b/board/siliconwaves/fpga/spl.c
+new file mode 100644
+index 0000000000..bfc52bbef0
+--- /dev/null
++++ b/board/siliconwaves/fpga/spl.c
+@@ -0,0 +1,36 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (c) 2020-2021 SiFive, Inc
++ *
++ * Authors:
++ *   Pragnesh Patel <pragnesh.patel@sifive.com>
++ */
++
++#include <init.h>
++#include <spl.h>
++#include <misc.h>
++#include <log.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <asm/gpio.h>
++#include <asm/arch/spl.h>
++
++int spl_board_init_f(void)
++{
++	/*nothing init*/
++	return 0;
++}
++
++u32 spl_boot_device(void)
++{
++	debug("trying boot from MMC1\n");
++	return BOOT_DEVICE_MMC1;
++}
++
++#ifdef CONFIG_SPL_LOAD_FIT
++int board_fit_config_name_match(const char *name)
++{
++	/* boot using first FIT config */
++	return 0;
++}
++#endif
+diff --git a/configs/siliconwaves_fpga_defconfig b/configs/siliconwaves_fpga_defconfig
+new file mode 100644
+index 0000000000..49ac9290b5
+--- /dev/null
++++ b/configs/siliconwaves_fpga_defconfig
+@@ -0,0 +1,52 @@
++CONFIG_RISCV=y
++# CONFIG_SPL_USE_ARCH_MEMMOVE is not set
++CONFIG_SYS_MALLOC_LEN=0x800000
++CONFIG_SYS_MALLOC_F_LEN=0x3000
++CONFIG_SPL_GPIO=y
++CONFIG_NR_DRAM_BANKS=1
++CONFIG_DEFAULT_DEVICE_TREE="siliconwaves-fpga"
++CONFIG_SPL=y
++CONFIG_SYS_LOAD_ADDR=0x80200000
++CONFIG_SYS_INIT_SP_ADDR=0x80200000
++CONFIG_SYS_PCI_64BIT=y
++CONFIG_AHCI=y
++CONFIG_TARGET_SILICONWAVES_FPGA=y
++CONFIG_ARCH_RV64I=y
++CONFIG_RISCV_SMODE=y
++CONFIG_DISTRO_DEFAULTS=y
++CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
++CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x80200000
++CONFIG_FIT=y
++CONFIG_SPL_LOAD_FIT_ADDRESS=0x84000000
++CONFIG_SPL_MMC=y
++CONFIG_USE_PREBOOT=y
++CONFIG_PREBOOT="setenv fdt_addr ${fdtcontroladdr};fdt addr ${fdtcontroladdr};"
++CONFIG_DEFAULT_FDT_FILE="siliconwaves/siliconwaves-fpga.dtb"
++CONFIG_DISPLAY_CPUINFO=y
++CONFIG_DISPLAY_BOARDINFO=y
++CONFIG_DISPLAY_BOARDINFO_LATE=y
++CONFIG_SPL_MAX_SIZE=0x100000
++CONFIG_SPL_BSS_START_ADDR=0x85000000
++CONFIG_SPL_STACK=0x8030000
++CONFIG_SPL_BSS_MAX_SIZE=0x100000
++# CONFIG_SPL_SHARES_INIT_SP_ADDR is not set
++CONFIG_SYS_SPL_MALLOC=y
++CONFIG_SYS_CBSIZE=256
++CONFIG_SYS_PBSIZE=276
++CONFIG_SYS_BOOTM_LEN=0x4000000
++CONFIG_CMD_MEMINFO=y
++CONFIG_SYS_RELOC_GD_ENV_ADDR=y
++CONFIG_SPL_CLK=y
++CONFIG_E1000=y
++CONFIG_SYS_NS16550=y
++CONFIG_SPL_RAM_DEVICE=y
++CONFIG_SPL_RAM_SUPPORT=y
++CONFIG_DISPLAY_CPUINFO=y
++CONFIG_DISPLAY_BOARDINFO=y
++CONFIG_DISPLAY_BOARDINFO_LATE=y
++CONFIG_CACHE=y
++CONFIG_SIFIVE_CCACHE=y
++CONFIG_EVENT_DEBUG=y
++CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_USE_SECTOR=y
++CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR=0x822
++CONFIG_SPL_OPENSBI_SCRATCH_OPTIONS=0x0
+diff --git a/drivers/cache/Kconfig b/drivers/cache/Kconfig
+index 40f41a817c..7dfff96eff 100644
+--- a/drivers/cache/Kconfig
++++ b/drivers/cache/Kconfig
+@@ -46,4 +46,11 @@ config SIFIVE_CCACHE
+ 	  This driver is for SiFive Composable L2/L3 cache. It enables cache
+ 	  ways of composable cache.
+ 
++config SILICONWAVES_CCACHE
++	bool "Siliconwaves composable cache"
++	select CACHE
++	help
++	  This driver is for Siliconwaves Composable L2/L3 cache. It enables cache
++	  ways of composable cache.
++
+ endmenu
+diff --git a/drivers/cache/Makefile b/drivers/cache/Makefile
+index ad765774e3..26369bd462 100644
+--- a/drivers/cache/Makefile
++++ b/drivers/cache/Makefile
+@@ -5,3 +5,4 @@ obj-$(CONFIG_L2X0_CACHE) += cache-l2x0.o
+ obj-$(CONFIG_NCORE_CACHE) += cache-ncore.o
+ obj-$(CONFIG_V5L2_CACHE) += cache-v5l2.o
+ obj-$(CONFIG_SIFIVE_CCACHE) += cache-sifive-ccache.o
++obj-$(CONFIG_SILICONWAVES_CCACHE) += cache-siliconwaves-ccache.o
+diff --git a/drivers/cache/cache-siliconwaves-ccache.c b/drivers/cache/cache-siliconwaves-ccache.c
+new file mode 100644
+index 0000000000..c393caaca3
+--- /dev/null
++++ b/drivers/cache/cache-siliconwaves-ccache.c
+@@ -0,0 +1,73 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2023 siliconwaves
++ */
++
++#include <common.h>
++#include <cache.h>
++#include <dm.h>
++#include <asm/io.h>
++#include <dm/device.h>
++#include <linux/bitfield.h>
++
++#define SILICONWAVES_CCACHE_CONFIG		0x000
++#define SILICONWAVES_CCACHE_CONFIG_WAYS	GENMASK(15, 8)
++
++#define SILICONWAVES_CCACHE_WAY_ENABLE	0x008
++
++struct siliconwaves_ccache {
++	void __iomem *base;
++};
++
++static int siliconwaves_ccache_enable(struct udevice *dev)
++{
++	struct siliconwaves_ccache *priv = dev_get_priv(dev);
++	u32 config;
++	u32 ways;
++
++	/* Enable all ways of composable cache */
++	config = readl(priv->base + SILICONWAVES_CCACHE_CONFIG);
++	ways = FIELD_GET(SILICONWAVES_CCACHE_CONFIG_WAYS, config);
++	writel(ways - 1, priv->base + SILICONWAVES_CCACHE_WAY_ENABLE);
++
++	return 0; 
++}
++
++static int siliconwaves_ccache_get_info(struct udevice *dev, struct cache_info *info)
++{
++	struct siliconwaves_ccache *priv = dev_get_priv(dev);
++
++	info->base = (uintptr_t)priv->base;
++
++	return 0;
++}
++
++static const struct cache_ops siliconwaves_ccache_ops = {
++	.enable = siliconwaves_ccache_enable,
++	.get_info = siliconwaves_ccache_get_info,
++};
++
++static int siliconwaves_ccache_probe(struct udevice *dev)
++{
++	struct siliconwaves_ccache *priv = dev_get_priv(dev);
++
++	priv->base = dev_read_addr_ptr(dev);
++	if (!priv->base)
++		return -EINVAL;
++
++	return 0;
++}
++
++static const struct udevice_id siliconwaves_ccache_ids[] = {
++	{ .compatible = "siliconwaves,w3k-ccache" },
++	{}
++};
++
++U_BOOT_DRIVER(siliconwaves_ccache) = {
++	.name = "siliconwaves_ccache",
++	.id = UCLASS_CACHE,
++	.of_match = siliconwaves_ccache_ids,
++	.probe = siliconwaves_ccache_probe,
++	.priv_auto = sizeof(struct siliconwaves_ccache),
++	.ops = &siliconwaves_ccache_ops,
++};
+diff --git a/drivers/mmc/Kconfig b/drivers/mmc/Kconfig
+index bf4d994ff6..e31bf3be2d 100644
+--- a/drivers/mmc/Kconfig
++++ b/drivers/mmc/Kconfig
+@@ -818,6 +818,12 @@ config MMC_MTK
+ 	  This is needed if support for any SD/SDIO/MMC devices is required.
+ 	  If unsure, say N.
+ 
++config SILICONWAVES_SDHCI
++	bool "Siliconwaves SD/MMC Host Controller support"
++	help
++	  This selects support for the SD/MMC Host Controller on
++	  Anarion SoCs.
++	  
+ endif
+ 
+ config FSL_ESDHC
+diff --git a/drivers/mmc/Makefile b/drivers/mmc/Makefile
+index 3a664c2ebb..11152d8d90 100644
+--- a/drivers/mmc/Makefile
++++ b/drivers/mmc/Makefile
+@@ -84,3 +84,4 @@ obj-$(CONFIG_RENESAS_SDHI)		+= tmio-common.o renesas-sdhi.o
+ obj-$(CONFIG_MMC_BCM2835)		+= bcm2835_sdhost.o
+ obj-$(CONFIG_MMC_MTK)			+= mtk-sd.o
+ obj-$(CONFIG_MMC_SDHCI_F_SDH30)		+= f_sdh30.o
++obj-$(CONFIG_SILICONWAVES_SDHCI)  += w3k_sdhci.o
+diff --git a/drivers/mmc/w3k_sdhci.c b/drivers/mmc/w3k_sdhci.c
+new file mode 100644
+index 0000000000..9e2a27aed6
+--- /dev/null
++++ b/drivers/mmc/w3k_sdhci.c
+@@ -0,0 +1,1115 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2023 Siliconwaves Corporation
++ *		      Richard Dai <richard@siliconwaves.com>
++ */
++
++#include <common.h>
++#include <dm.h>
++#include <fdtdec.h>
++#include <asm/global_data.h>
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/libfdt.h>
++#include <malloc.h>
++#include <sdhci.h>
++#include <asm/cache.h>
++#define HS400
++#define W3K_MMC_MIN_CLK 400000
++#define W3K_MMC_MAX_CLK 50000000
++#define W3K_SDHCI_SOFTWARE_RESET	0x00 
++#define  W3K_SDHCI_RESET_ALL	0x04
++#define W3K_SDHCI_CLOCK_CONTROL	0x00
++#define W3K_SDHCI_ADMA_SAR_REG	0x10c
++#define W3K_SDHCI_STA_REG		0x020
++#define W3K_SDHCI_ARGUMENT		0x01C
++#define W3K_SDHCI_BLOCK_COUNT	0x034
++#define W3K_SDHCI_INT_STATUS	0x00C
++#define W3K_SDHCI_DMA_STATUS	0x110
++#define W3K_SDHCI_DMA_CTL_REG 	0x110
++#define W3K_SDHCI_DMA_CTL		0x108
++#define W3K_SRAM_TO_MEM_FLAG 1
++#define W3K_SDHCI_MAKE_CMD(c, f) ((c & 0x3f) | ((f & 0x7) << 7))
++DECLARE_GLOBAL_DATA_PTR;
++void *aligned_buffer;
++#define W3C_SDHCI_SDMA_ENABLE 1
++struct w3k_sdhci_adma_desc {
++	u8 attr;
++	u8 reserved;
++	u16 len;
++	u32 addr;
++} __packed;
++
++static void w3k_sdhci_adma_desc(struct w3k_sdhci_adma_desc *desc,
++			    u32 addr, u16 len, bool end)
++{
++	u8 attr;
++
++	attr = ADMA_DESC_ATTR_VALID | ADMA_DESC_TRANSFER_DATA;
++	if (end)
++		attr |= ADMA_DESC_ATTR_END;
++
++	desc->attr = attr;
++	desc->len = len;
++	desc->reserved = 0;
++	desc->addr = addr;
++}
++
++struct w3k_sdhci_adma_desc *w3k_sdhci_adma_init(uint total_len)
++{
++	uint desc_count = DIV_ROUND_UP(total_len, ADMA_MAX_LEN);
++	return  (struct w3k_sdhci_adma_desc *)
++				memalign(64, desc_count *
++				sizeof(struct w3k_sdhci_adma_desc));
++}
++
++void w3k_sdhci_adma_start(struct sdhci_host *host, void *addr, int dir)
++{
++	if(dir & MMC_DATA_WRITE)
++		sdhci_writel(host, 0x000000000, W3K_SDHCI_DMA_CTL);
++	else 
++		sdhci_writel(host, 0x80000000, W3K_SDHCI_DMA_CTL);
++	
++	sdhci_writel(host, (unsigned int)addr, W3K_SDHCI_ADMA_SAR_REG);
++}
++
++void w3k_sdhci_prepare_adma_table(struct w3k_sdhci_adma_desc *table,
++			      struct mmc_data *data)
++{
++	uint trans_bytes = data->blocksize * data->blocks;
++	uint desc_count = DIV_ROUND_UP(trans_bytes, ADMA_MAX_LEN);
++	struct w3k_sdhci_adma_desc *desc = table;
++	int i = desc_count;
++	uint addr;
++	
++	if (data->flags & MMC_DATA_READ)
++		addr = data->dest;
++	else
++		addr = data->src;
++
++	while (--i ) {
++		w3k_sdhci_adma_desc(desc, addr, ADMA_MAX_LEN, false);
++		addr += ADMA_MAX_LEN;
++		trans_bytes -= ADMA_MAX_LEN;
++		desc++;
++	}
++
++	w3k_sdhci_adma_desc(desc, addr, trans_bytes, true);
++	desc = table;
++	for(i = 0; i < desc_count; i++){
++		debug("attr:0x%x, len = %d, addr = 0x%x\n", desc->attr, desc->len, desc->addr);
++		desc++;
++	}
++	//flush_cache((dma_addr_t)table,
++	//	    ROUND(desc_count * sizeof(struct sdhci_adma_desc),
++	//		  ARCH_DMA_MINALIGN));
++}
++
++
++struct w3k_sdhci_plat {
++	struct mmc_config cfg;
++	struct mmc mmc;
++};
++
++struct w3k_sdhci_priv {
++	struct sdhci_host host;
++	unsigned int clock;
++};
++static void w3k_sdhci_dma_flush(struct sdhci_host *host);
++static void w3k_sdhci_hw_reset(struct sdhci_host *host);
++static void w3k_sdhci_clk_ctrl(struct sdhci_host *host, int enable);
++
++void ccache2_flush(u64 flush_addr, int len) {
++	int i = 0;
++	__asm volatile("fence rw, io" : : : "memory");
++	do{
++		*(volatile u64*)(0x2010200) = flush_addr + i;
++		len -= 64;
++		i+=64;
++	}while(len > 0);
++	__asm volatile("fence io, rw" : : : "memory");
++}
++
++
++static void sdhci_disable_dma(struct sdhci_host *host)
++{
++	debug("%s()\n", __func__);
++
++	sdhci_writel(host, 0x00020000, W3K_SDHCI_DMA_CTL);
++	debug("write W3K_SDHCI_DMA_CTL(0x%x): 0x%x\n", W3K_SDHCI_DMA_CTL, 0x00020000);
++
++	while (sdhci_readl(host, W3K_SDHCI_DMA_CTL) & 0x00020000);
++}
++
++static int sdhci_transfer_data(struct sdhci_host *host, struct mmc_data *data,
++				unsigned int start_addr)
++{
++	unsigned int int_stat, dma_stat, timeout, sync_flag = 0;
++
++	debug("%s()\n", __func__);
++
++	timeout = 1000000;
++
++	do {
++		int_stat = sdhci_readl(host, W3K_SDHCI_INT_STATUS);
++		dma_stat = sdhci_readl(host, W3K_SDHCI_DMA_STATUS);
++
++		if ((dma_stat & 0xF) != 0x0) {
++			if ((dma_stat & 0x2) || (dma_stat & 0x8)) {
++				sync_flag |= 0x4;
++				debug("%s: DMA done\n", __func__);
++			}
++			if (dma_stat & 0x4) {
++				debug("%s: Error detected in status(0x%X)!\n",
++				       __func__, dma_stat);
++			}
++
++			/* clear dma interrupt */
++			sdhci_writel(host, dma_stat, W3K_SDHCI_DMA_STATUS);
++			debug("write W3K_SDHCI_DMA_STATUS(0x%x): 0x%x\n", W3K_SDHCI_DMA_STATUS, dma_stat);
++		}
++#define  W3K_DAT_DONE	0x00001000	/* data transfer done */
++		if (int_stat != 0x0) {
++			/* handle data requests */
++			if (int_stat & W3K_DAT_DONE) {
++				sync_flag |= 0x2;
++				debug("%s: data done\n", __func__);
++			}
++#define  W3K_DAT_TIMEOUT	0x00004000	/* data timeout */
++#define  W3K_DAT_CRC_ERROR	0x00008000	/* data crc error */
++			if ((int_stat & W3K_DAT_TIMEOUT) ||
++			    (int_stat & W3K_DAT_CRC_ERROR)) {
++				sdhci_disable_dma(host);
++
++				debug("%s: Error detected in status(0x%X)!\n",
++				       __func__, int_stat);
++				return -1;
++			}
++
++			/* clear controller interrupt */
++			sdhci_writel(host, int_stat, W3K_SDHCI_INT_STATUS);
++			debug("write W3K_SDHCI_INT_STATUS(0x%x): 0x%x\n", W3K_SDHCI_INT_STATUS, int_stat);
++		}
++
++		if (sync_flag == 0x6) {
++			return 0;
++		}
++
++		if (timeout-- > 0) {
++			udelay(10);
++		} else {
++			debug("%s: Transfer data timeout\n", __func__);
++			return -1;
++		}
++	} while (1);
++
++	return 0;
++}
++
++
++static void sdhci_cmd_done(struct sdhci_host *host, struct mmc_cmd *cmd)
++{
++	int i;
++
++	debug("%s()\n", __func__);
++#define W3K_SDHCI_RESPONSE		0x24
++	if (cmd->resp_type & MMC_RSP_136) {
++		/* CRC is stripped so we need to do some shifting. */
++		for (i = 0; i < 4; i++) {
++			cmd->response[i] = sdhci_readl(host,
++					W3K_SDHCI_RESPONSE + (3 - i) * 4);
++		}
++	} else {
++		cmd->response[0] = sdhci_readl(host, W3K_SDHCI_RESPONSE);
++	}
++}
++#if 0
++static void w3k_sdhci_reset(struct sdhci_host *host, u32 mask)
++{
++	unsigned long timeout;
++	unsigned int val;
++
++	debug("%s()\n", __func__);
++	/* Wait max 100 ms */
++	timeout = 100;
++	val = sdhci_readl(host, W3K_SDHCI_SOFTWARE_RESET);
++	val |= mask;
++	sdhci_writel(host, val, W3K_SDHCI_SOFTWARE_RESET);
++	debug("write W3K_SDHCI_SOFTWARE_RESET(0x%x): 0x%x\n", W3K_SDHCI_SOFTWARE_RESET, val);
++
++	while (sdhci_readl(host, W3K_SDHCI_SOFTWARE_RESET) & mask) {
++		if (timeout == 0) {
++			debug("%s: Reset 0x%x never completed.\n",
++			       __func__, (int)mask);
++			return;
++		}
++		timeout--;
++		udelay(1000);
++	}
++}
++#endif
++static int __w3k_sdhci_send_command(struct udevice *dev, struct mmc_cmd *cmd,
++		       struct mmc_data *data);
++
++struct w3k_mmc_data {
++	union {
++		char *dest;
++		char *src; /* src buffers don't get written to */
++	};
++	uint flags;
++	uint blocks;
++	uint blocksize;
++};
++#if 1
++static int w3k_sdhci_send_command(struct udevice *dev, struct mmc_cmd *cmd,
++		       struct mmc_data *data)
++{
++#define W3K_ONCE_TRAN_BYTES_LEN (1024*32)
++	struct w3k_mmc_data data_tmp;
++	struct w3k_mmc_data *ptr_data;
++	struct mmc_cmd *ptr_cmd;
++	uint size;
++	int ret = -1;
++	uint blocksize, blocks, count_blocks, last_size;
++	uint tran_blocks;
++	//cmd16 设置块大小的命令
++	struct mmc_cmd set_blocksize_cmd = {
++		.cmdidx = 0x10, 
++		.resp_type = 0x15,
++		.cmdarg = 0, //块大小
++	};
++	//读多个块的命令
++	struct mmc_cmd read_multiblock_cmd = {
++		.cmdidx = 0x12, 
++		.resp_type = 0x15,
++		.cmdarg = 0, //块位置
++	};
++	//写多个块的命令
++	struct mmc_cmd write_multiblock_cmd = {
++		.cmdidx = 0x19, 
++		.resp_type = 0x15,
++		.cmdarg = 0, //块位置
++	};
++	//停止传输命令
++	struct mmc_cmd stop_tran_cmd = {
++		.cmdidx = 0xc, 
++		.resp_type = 0x1d,
++		.cmdarg = 0,
++	};
++	//send状态传输命令
++	struct mmc_cmd send_status_cmd = {
++		.cmdidx = 0xd, 
++		.resp_type = 0x15,
++		.cmdarg = 0x10000,
++	};
++
++	if(data){
++		size = data->blocksize *data->blocks;
++		count_blocks = data->blocks;
++		tran_blocks = W3K_ONCE_TRAN_BYTES_LEN/data->blocksize;
++	}
++
++	debug("\ncmdidx = 0x%x, resp_type = 0x%x, cmdarg= 0x%x\n", cmd->cmdidx, cmd->resp_type, cmd->cmdarg);
++	if(data && count_blocks >=  tran_blocks){
++		debug("count_blocks = %d, tran_blocks = %d\n", count_blocks, tran_blocks);
++		if(count_blocks >= tran_blocks && count_blocks <= (tran_blocks*2)){
++			debug("%s %d: data->blocks = %d\n", __func__, __LINE__, data->blocks);
++			goto out;
++		}
++		set_blocksize_cmd.cmdarg = data->blocksize;
++		
++		memcpy(&data_tmp, data, sizeof(struct mmc_data));
++		if (data->flags & MMC_DATA_READ)
++			ptr_cmd = &read_multiblock_cmd;
++		else
++			ptr_cmd = &write_multiblock_cmd;
++		ptr_cmd->cmdarg = cmd->cmdarg;
++		ptr_data = &data_tmp;
++		ptr_data->blocks = tran_blocks;
++		
++		while(1){
++			ret = __w3k_sdhci_send_command(dev, ptr_cmd, (struct mmc_data *)ptr_data);
++			if(ret < 0)
++				break;
++			/*重启一次传输*/
++			count_blocks -= tran_blocks;
++			size -= (ptr_data->blocks * data->blocksize);
++			if(size == 0){
++				memcpy(cmd->response, ptr_cmd->response, sizeof(ptr_cmd->response));
++				break;
++			}
++			//停止传输
++			ret = __w3k_sdhci_send_command(dev, &stop_tran_cmd, NULL);
++			if(ret < 0)
++				break;
++			//send状态传输命令
++			if(data->flags & MMC_DATA_WRITE){
++				ret = __w3k_sdhci_send_command(dev, &send_status_cmd, NULL);
++				if(ret < 0)
++					break;
++			}
++		
++			if(count_blocks >= tran_blocks && count_blocks <= (tran_blocks*2)){
++				//一次性传输剩余数据
++				ptr_data->blocks = count_blocks;
++			}
++			ptr_cmd->cmdarg += tran_blocks;
++
++			if (data->flags & MMC_DATA_READ){
++				ptr_data->dest += W3K_ONCE_TRAN_BYTES_LEN;
++			}
++			else{
++				ptr_data->src += W3K_ONCE_TRAN_BYTES_LEN;
++			}
++			//设置块大小
++			ret = __w3k_sdhci_send_command(dev, &set_blocksize_cmd, NULL);
++			if(ret < 0)
++				break;
++		}	
++	}else {
++out:
++		ret = __w3k_sdhci_send_command(dev, cmd, data);
++	}
++	return ret;
++}
++#endif
++static int __w3k_sdhci_send_command(struct udevice *dev, struct mmc_cmd *cmd,
++		       struct mmc_data *data)
++{
++	struct mmc *mmc = mmc_get_mmc_dev(dev);
++	struct sdhci_host *host = mmc->priv;
++	unsigned int stat = 0;
++	unsigned int command = 0, autocmd;
++	int ret = 0;
++	int trans_bytes = 0;
++	u32 flags = 0;
++	unsigned int start_addr = 0;
++#ifdef  W3K_SRAM_TO_MEM_FLAG 
++	char* sram_addr = (char*)0x40050000;
++	char* sram_addr_write = (char*)0x40020000;
++#endif
++	unsigned int retry = 10000;
++#ifndef W3C_SDHCI_SDMA_ENABLE
++	struct w3k_sdhci_adma_desc *adma_table = NULL;
++#endif
++	debug("%s(%d)\n", __func__, cmd->cmdidx);
++
++	while (sdhci_readl(host, W3K_SDHCI_STA_REG) & 0x3);
++
++	sdhci_writel(host, cmd->cmdarg, W3K_SDHCI_ARGUMENT);
++	debug("write W3K_SDHCI_ARGUMENT(0x%x): 0x%x\n", W3K_SDHCI_ARGUMENT, cmd->cmdarg);
++
++	/* Set Transfer mode regarding to data flag */
++	if (data != 0) {
++		w3k_sdhci_dma_flush(host);
++		/* set controller data length */
++		command = ((data->blocksize & 0xFFF) << 16);
++
++		/* set controller block count */
++		if (data->blocks == 1) {
++			command |= 0x00000800;
++		} else if (data->blocks > 1) {
++			command |= 0x00001000;
++		}
++
++		if (data->flags & MMC_DATA_WRITE) {
++			command |= 0x00002000;
++		}
++
++		sdhci_writel(host, data->blocks, W3K_SDHCI_BLOCK_COUNT);
++		debug("write W3K_SDHCI_BLOCK_COUNT(0x%x): 0x%x\n", W3K_SDHCI_BLOCK_COUNT, data->blocks);
++
++		stat = sdhci_readl(host, W3K_SDHCI_DMA_STATUS);
++		sdhci_writel(host, stat, W3K_SDHCI_DMA_STATUS);
++		debug("write W3K_SDHCI_DMA_STATUS(0x%x): 0x%x\n", W3K_SDHCI_DMA_STATUS, stat);
++#if W3C_SDHCI_SDMA_ENABLE
++		if (data->flags & MMC_DATA_WRITE) {
++			sdhci_writel(host, 0x000000000, W3K_SDHCI_DMA_CTL);
++			debug("write W3K_SDHCI_DMA_CTL(0x%x): 0x%x\n", W3K_SDHCI_DMA_CTL, 0x00000300);
++		} else {
++			sdhci_writel(host, 0x80000000, W3K_SDHCI_DMA_CTL);
++			debug("write W3K_SDHCI_DMA_CTL(0x%x): 0x%x\n", W3K_SDHCI_DMA_CTL, 0x80000300);
++		}
++		trans_bytes = data->blocks * data->blocksize;
++		if (data->flags & MMC_DATA_READ){
++#ifdef W3K_SRAM_TO_MEM_FLAG
++			start_addr = sram_addr;
++#else
++			start_addr = (unsigned int)data->dest;
++			//ccache2_flush(start_addr, trans_bytes);
++#endif
++		}
++		else{
++#ifdef W3K_SRAM_TO_MEM_FLAG
++			//debug("write copy 0x%x from 0x%x len:%d\n", (unsigned int )sram_addr_write,  (unsigned int )data->src, trans_bytes);
++			memcpy(sram_addr_write, data->src, trans_bytes);
++			start_addr = (unsigned int)sram_addr_write;
++#else
++			start_addr = (unsigned int)data->src;
++#endif
++		}	
++		debug("%s %d blocksize = %d, blocks = %d\n", __func__, __LINE__, data->blocksize, data->blocks);
++		//flush_cache(start_addr, trans_bytes+ARCH_DMA_MINALIGN);
++		//invalidate_dcache_range(start_addr, start_addr+trans_bytes+ARCH_DMA_MINALIGN);
++		
++#define W3K_SDHCI_SDMA_SADDR	0x0100
++#define W3K_SDHCI_SDMA_LEN		0x0104
++		sdhci_writel(host, start_addr, W3K_SDHCI_SDMA_SADDR);
++		debug("write W3K_SDHCI_SDMA_SADDR(0x%x): 0x%x\n", W3K_SDHCI_SDMA_SADDR, start_addr);
++		sdhci_writel(host, trans_bytes & 0XFFFFF, W3K_SDHCI_SDMA_LEN);
++		debug("write W3K_SDHCI_SDMA_LEN(0x%x): 0x%x\n", W3K_SDHCI_SDMA_LEN, trans_bytes);
++#else
++		adma_table = w3k_sdhci_adma_init(data->blocks * data->blocksize);
++		if(!adma_table){
++			debug("%s %d: w3k_sdhci_adma_init error\n", __func__, __LINE__);
++		}
++		w3k_sdhci_prepare_adma_table(adma_table, data);
++		debug("amda descriptor:0x%x\n", (unsigned int)adma_table);
++		w3k_sdhci_adma_start(host, (void*)adma_table, data->flags);
++#endif
++	}
++/* SDMMC_CMD bit fields */
++#define  SD_RESP_NO	 0x0	/* no response */
++#define  SD_RESP_R1	 0x1	/* R1/R5/R6/R7,R48-count */
++#define  SD_RESP_R2	 0x2	/* R2, R136-count */
++#define  SD_RESP_R3	 0x3	/* R3, R48 */
++#define  SD_RESP_R4	 0x4	/* R4, R48 */
++#define  SD_RESP_R1B 0x7	/* R1b */
++
++	/* Translate mmc_resp_type(cmd) to known form of anarion sd/mmc controller */
++	switch (cmd->resp_type) {
++	case MMC_RSP_NONE:
++		flags = SD_RESP_NO;
++		break;
++	case MMC_RSP_R1:
++	case (MMC_RSP_PRESENT|MMC_RSP_OPCODE):
++		flags = SD_RESP_R1;
++		break;
++	case MMC_RSP_R1b:
++		flags = SD_RESP_R1B;
++		break;
++	case MMC_RSP_R2:
++		flags = SD_RESP_R2;
++		break;
++	case MMC_RSP_R3:	/* MMC_RSP_R4 */
++		flags = SD_RESP_R3;
++		break;
++	default :
++		debug("Unknown response type!!!\n");
++		flags = SD_RESP_NO;
++		break;
++	}
++
++	if (cmd->resp_type & MMC_RSP_CRC)
++		command |= 0x40000000;
++	if(0){
++	//if (W3K_SDHCI_MAKE_CMD(cmd->cmdidx, flags) == MMC_CMD_SET_BLOCK_COUNT) {
++		command |= (2 << 28);
++		autocmd = W3K_SDHCI_MAKE_CMD(cmd->cmdidx, flags);
++		autocmd |= (SD_RESP_R1 << 7);
++		autocmd |= (1 << 10);
++		autocmd |= (0 << 11);	/* no data */
++		autocmd |= (0 << 14);
++		autocmd |= (1 << 30);
++#define W3K_SDHCI_ACMD_REG		0x6C
++		sdhci_writel(host, autocmd, W3K_SDHCI_ACMD_REG);
++	}
++
++	stat = sdhci_readl(host, W3K_SDHCI_INT_STATUS);
++	sdhci_writel(host, stat, W3K_SDHCI_INT_STATUS);
++	debug("write W3K_SDHCI_INT_STATUS(0x%x): 0x%x\n", W3K_SDHCI_INT_STATUS, stat);
++
++	debug("command : 0x%x\n", W3K_SDHCI_MAKE_CMD(cmd->cmdidx, flags) | command);
++#define W3K_SDHCI_COMMAND		0x18
++	sdhci_writel(host, W3K_SDHCI_MAKE_CMD(cmd->cmdidx, flags) | command, W3K_SDHCI_COMMAND);
++	debug("write W3K_SDHCI_COMMAND(0x%x): 0x%x\n", W3K_SDHCI_COMMAND, W3K_SDHCI_MAKE_CMD(cmd->cmdidx, flags) | command);
++
++	do {
++		stat = sdhci_readl(host, W3K_SDHCI_INT_STATUS);
++		if (stat & 0x00000100) {
++			debug("%s: command done 0x%x\n", __func__, stat);
++			break;
++		}
++		if (stat & 0x00000200) {
++			debug("%s(0x%x): command timeout 0x%x\n",
++					__func__, sdhci_readl(host, W3K_SDHCI_COMMAND), stat);
++			break;
++		}
++		if (stat & 0x00000400) {
++			debug("%s(0x%x): command crc error 0x%x\n",
++					__func__, sdhci_readl(host, W3K_SDHCI_COMMAND), stat);
++			break;
++		}
++	} while (--retry != 0);
++
++	if (retry == 0) {
++		if (host->quirks & SDHCI_QUIRK_BROKEN_R1B)
++			return 0;
++		else {
++			debug("%s: Timeout for status update!\n", __func__);
++			return -ETIMEDOUT;
++		}
++	}
++
++	if (stat & 0x00000100) {
++		sdhci_cmd_done(host, cmd);
++	} else
++		ret = -1;
++	
++	if (!ret && data)
++		ret = sdhci_transfer_data(host, data, start_addr);
++	
++#ifndef  W3C_SDHCI_SDMA_ENABLE
++	if(adma_table)
++		free(adma_table);
++#endif
++	if (host->quirks & SDHCI_QUIRK_WAIT_SEND_CMD)
++		udelay(1000);
++	
++	stat = sdhci_readl(host, W3K_SDHCI_INT_STATUS);
++	sdhci_writel(host, stat, W3K_SDHCI_INT_STATUS);
++	debug("write W3K_SDHCI_INT_STATUS(0x%x): 0x%x\n", W3K_SDHCI_INT_STATUS, stat);
++
++#ifdef W3K_SRAM_TO_MEM_FLAG	
++	if (!ret && data && data->flags & MMC_DATA_READ){
++		//debug("read copy 0x%x to 0x%x len:%d\n", (unsigned int )sram_addr,  (unsigned int )data->dest, trans_bytes);
++		memcpy(data->dest, (void*)sram_addr, trans_bytes);
++	}
++	if(!ret && data)
++		return 0;
++#endif	
++
++#define  W3K_SDHCI_INT_TIMEOUT	0x00000200
++#define  W3K_SDHCI_INT_DATA_TIMEOUT	0x00004000
++	//w3k_sdhci_reset(host, W3K_SDHCI_RESET_ALL);
++
++	//clear dma interrupt flag
++	u32 reg_value = sdhci_readl(host, W3K_SDHCI_DMA_STATUS);
++	sdhci_writel(host, reg_value, W3K_SDHCI_DMA_STATUS);
++
++	if (stat & (W3K_SDHCI_INT_TIMEOUT | W3K_SDHCI_INT_DATA_TIMEOUT))
++		return -ETIMEDOUT;
++	else
++		return 0;
++}
++
++//#define USE_400K_CLOCK
++//#define USE_1M_CLOCK
++static int w3k_sdhci_set_clock(struct mmc *mmc, unsigned int clock)
++{
++	struct sdhci_host *host = mmc->priv;
++	unsigned int div, clk;
++
++	debug("%s()\n", __func__);
++
++	if (clock == 0)
++		return 0;
++#ifdef USE_400K_CLOCK
++	if (clock >400000)
++		return 0;
++#endif
++	if (SDHCI_GET_VERSION(host) >= SDHCI_SPEC_300) {
++		/* Version 3.00 divisors must be a multiple of 2. */
++		if (mmc->cfg->f_max <= clock)
++			div = 1;
++		else {
++			for (div = 2; div < SDHCI_MAX_DIV_SPEC_300; div += 2) {
++				if ((mmc->cfg->f_max / div) <= clock)
++					break;
++			}
++		}
++	} else {
++		/* Version 2.00 divisors must be a power of 2. */
++		for (div = 1; div < SDHCI_MAX_DIV_SPEC_200; div *= 2) {
++			if ((mmc->cfg->f_max / div) <= clock)
++				break;
++		}
++	}
++#ifdef USE_1M_CLOCK
++	div = 12;
++#else
++	div >>= 1;
++#endif
++	clk = sdhci_readl(host, W3K_SDHCI_CLOCK_CONTROL);
++	clk &= ~(0x003FFF00);
++#define  W3K_SDHCI_DIVIDER_SHIFT	8
++#define  W3K_SDHCI_DIV_MASK		0x1FFF
++	if (div)
++		clk |= ((div - 1) & W3K_SDHCI_DIV_MASK) << W3K_SDHCI_DIVIDER_SHIFT;
++	else
++		clk |= 0x00200000;
++
++	debug("%s: clock = %d, reg : 0x%x \n", __func__, clock, clk);
++
++	sdhci_writel(host, clk, W3K_SDHCI_CLOCK_CONTROL);
++	debug("write W3K_SDHCI_CLOCK_CONTROL(0x%x): 0x%x\n", W3K_SDHCI_CLOCK_CONTROL, clk);
++
++	while (sdhci_readl(host, W3K_SDHCI_CLOCK_CONTROL) & 0x80);
++
++	return 0;
++}
++
++static int w3k_sdhci_set_ios(struct udevice *dev)
++{
++	unsigned int ctrl;
++	int count;
++	struct mmc *mmc = mmc_get_mmc_dev(dev);
++	struct sdhci_host *host = mmc->priv;
++
++	if (mmc->clock != host->clock){
++		w3k_sdhci_set_clock(mmc, mmc->clock);
++	}
++#define W3K_SDHCI_HOST_CONTROL	0x14
++#define  W3K_SDHCI_CTRL_BITBUS_MASK	0x00030000
++	/* Set bus width */
++	ctrl = sdhci_readl(host, W3K_SDHCI_HOST_CONTROL);
++	ctrl &= ~(W3K_SDHCI_CTRL_BITBUS_MASK);
++	if (mmc->bus_width == 8) {
++		if ((SDHCI_GET_VERSION(host) >= SDHCI_SPEC_300) ||
++				(host->quirks & SDHCI_QUIRK_USE_WIDE8))
++			ctrl |= SDHCI_CTRL_8BITBUS;
++	} else {
++		if (mmc->bus_width == 4)
++			ctrl |= SDHCI_CTRL_4BITBUS;
++	}
++	sdhci_writel(host, ctrl, W3K_SDHCI_HOST_CONTROL);
++	debug("write W3K_SDHCI_HOST_CONTROL(0x%x): 0x%x\n", W3K_SDHCI_HOST_CONTROL, ctrl);
++
++	debug("mmc->clock : %d\n", mmc->clock);
++	/* HS200/HS400 */
++	if (mmc->clock >= 100000000) {
++#define W3K_SDHCI_ODL_REG		0x8C
++		ctrl = sdhci_readl(host, W3K_SDHCI_ODL_REG);
++		ctrl &= ~(0x0000FFFF);
++#ifdef HS400
++		ctrl |= 0x00001010;
++#else	/* HS200 */
++		ctrl |= 0x00001C1C;
++#endif
++		sdhci_writel(host, ctrl, W3K_SDHCI_ODL_REG);
++#define W3K_SDHCI_KDL_REG		0x74
++		/* enable data out delay, command out delay */
++		ctrl = sdhci_readl(host, W3K_SDHCI_KDL_REG);
++		ctrl &= ~0x0000000F;
++		ctrl |= 0x00000002;
++		ctrl |= (3 << 7);
++		sdhci_writel(host, ctrl, W3K_SDHCI_KDL_REG);
++		while (sdhci_readl(host, W3K_SDHCI_KDL_REG) & 0x00000180);
++#define W3K_SDHCI_PCH1_REG		0x5C
++		/* Nerc & Necs */
++		ctrl = sdhci_readl(host, W3K_SDHCI_PCH1_REG);
++		ctrl &= ~0x000000FF;
++		ctrl |= 0x55;
++		sdhci_writel(host, ctrl, W3K_SDHCI_PCH1_REG);
++#define W3K_SDHCI_LAT_REG		0x04
++		ctrl = sdhci_readl(host, W3K_SDHCI_LAT_REG);
++		ctrl &= ~0x0000007F;
++#ifdef HS400
++		ctrl |= 0x00000050;
++#else	/* HS200 */
++		ctrl |= 0x00000000;
++#endif
++		sdhci_writel(host, ctrl, W3K_SDHCI_LAT_REG);
++#define W3K_SDHCI_DLL_REG		0x88
++#ifdef HS400
++		count = 0;
++		ctrl = sdhci_readl(host, W3K_SDHCI_DLL_REG);
++		ctrl &= ~0x1;
++		sdhci_writel(host, ctrl, W3K_SDHCI_DLL_REG);
++		mdelay(1);
++		ctrl |= 0x1;
++		sdhci_writel(host, ctrl, W3K_SDHCI_DLL_REG);
++
++		while ((sdhci_readl(host, W3K_SDHCI_DLL_REG) & 0x6) == 0x0) {
++			count++;
++			if (count > 10000) {
++				count = 0;
++				ctrl = sdhci_readl(host, W3K_SDHCI_DLL_REG);
++				ctrl &= ~0x1;
++				sdhci_writel(host, ctrl, W3K_SDHCI_DLL_REG);
++				mdelay(1);
++				ctrl |= 0x1;
++				sdhci_writel(host, ctrl, W3K_SDHCI_DLL_REG);
++				debug("<error> reset DLL\n");
++			}
++		}
++		debug("W3K_SDHCI_DLL_REG : 0x%x\n", sdhci_readl(host, W3K_SDHCI_DLL_REG));
++
++#else	/* HS200 */
++#if 0
++#define W3K_SDHCI_ATRG_REG		0x70
++		ctrl = sdhci_readl(host, W3K_SDHCI_ATRG_REG);
++		ctrl &= ~(0x0000000F);
++		ctrl |= 0x00000002;
++		sdhci_writel(host, ctrl, W3K_SDHCI_ATRG_REG);
++
++		ctrl = sdhci_readl(host, W3K_SDHCI_LAT_REG);
++		ctrl &= ~0x00FFFF7F;
++//		ctrl |= ((fdl_n << 16) | (idl_n << 8) |
++//			(dlat_sel << 5) |
++//			(rlat_sel << 3) | (dlat_neg << 2) |
++//			(rlat_neg << 1) | (sel_fck << 0));
++		sdhci_writel(host, ctrl, W3K_SDHCI_LAT_REG);
++
++		printk("W3K_SDHCI_LAT_REG : 0x%x\n", sdhci_readl(host, W3K_SDHCI_LAT_REG));
++
++		ctrl = sdhci_readl(host, W3K_SDHCI_KDL_REG);
++		ctrl &= ~0x0000000F;
++		ctrl |= 0x00000002;
++		ctrl |= ((1 << 6) | (1 << 5));
++		sdhci_writel(host, ctrl, W3K_SDHCI_KDL_REG);
++		while (sdhci_readl(host, W3K_SDHCI_KDL_REG) & 0x0000060);
++
++
++
++		ctrl = sdhci_readl(host, W3K_SDHCI_CLOCK_CONTROL);
++		debug("read reg - SDHCI_CK_REG 0x%x\n", ctrl);
++		ctrl &= ~(0x7 << 22);
++#ifdef HS400
++		ctrl |= (1 << 22) | (0 << 23) | (1 << 24);
++#else	/* HS200 */
++		ctrl |= (0 << 22) | (0 << 23) | (0 << 24);
++#endif
++		sdhci_writel(host, ctrl, W3K_SDHCI_CLOCK_CONTROL);
++		debug("write reg - SDHCI_CK_REG 0x%x\n", ctrl);
++
++		while (sdhci_readl(host, W3K_SDHCI_CLOCK_CONTROL) & 0x80);
++	}
++#endif
++
++#endif
++	}
++//	if (mmc->clock > 26000000)
++//		ctrl |= SDHCI_CTRL_HISPD;
++//	else
++//		ctrl &= ~SDHCI_CTRL_HISPD;
++
++//	if (host->quirks & SDHCI_QUIRK_NO_HISPD_BIT)
++//		ctrl &= ~SDHCI_CTRL_HISPD;
++
++//	sdhci_writeb(host, ctrl, W3K_SDHCI_HOST_CONTROL);
++	return 0;
++}
++
++
++static struct dm_mmc_ops w3k_mmc_ops = {
++	.send_cmd	= w3k_sdhci_send_command,
++	.set_ios	= w3k_sdhci_set_ios,
++};
++
++#define W3K_SDHCI_GC_REG 0xffc
++static void w3k_sdhci_clk_ctrl(struct sdhci_host *host, int enable)
++{
++	u32 val = sdhci_readl(host, W3K_SDHCI_GC_REG);
++	if(enable == 1)
++		val &=~(1<<1);
++	else
++		val |= (1<<1);
++	sdhci_writel(host, val, W3K_SDHCI_GC_REG);
++}
++
++static void w3k_sdhci_reset_clk(struct sdhci_host *host)
++{
++	w3k_sdhci_clk_ctrl(host, 0);
++	w3k_sdhci_clk_ctrl(host, 1);
++}
++
++static void w3k_sdhci_chip_reset(struct sdhci_host *host)
++{
++#define 	W3K_SDHCI_VDDP_REG 0x0a0
++	u32 count = 10000;
++	sdhci_writel(host, 0, W3K_SDHCI_VDDP_REG);
++    while (count--){}
++	sdhci_writel(host, 1<<1, W3K_SDHCI_VDDP_REG);
++}
++
++static void w3k_sdhci_ck_reset(struct sdhci_host *host)
++{
++#define W3K_SDHCI_CK_REG 0
++	sdhci_writel(host, 0, W3K_SDHCI_CK_REG);
++	sdhci_writel(host, 1 << 2 | 1 << 3, W3K_SDHCI_CK_REG);
++}
++
++static void w3k_sdhci_dma_flush(struct sdhci_host *host)
++{
++
++	u32 val = sdhci_readl(host, W3K_SDHCI_DMA_CTL_REG);	
++	val &= ~(1<<17);
++	val |= (1&1)<<17;
++	sdhci_writel(host, val, W3K_SDHCI_DMA_CTL_REG);
++	while((sdhci_readl(host, W3K_SDHCI_DMA_CTL_REG) & (1<<17))!=0)
++		asm volatile("nop"); 
++}
++
++static void w3k_sdhci_hw_reset(struct sdhci_host *host)
++{
++	w3k_sdhci_reset_clk(host);
++	w3k_sdhci_chip_reset(host);
++	w3k_sdhci_ck_reset(host);
++	w3k_sdhci_dma_flush(host);
++}
++
++void w3k_sdhci_host_init(struct sdhci_host *host)
++{
++	int sck_auto_gate_off = 0, sck_enable = 1, ddr_mode = 0;
++	int fck_divider = 30;
++	u32 reg_value = 0;
++    reg_value |= (!(sck_auto_gate_off & 0x01)) << 1;
++    reg_value |= (!(sck_enable & 0x01)) << 4;
++    reg_value |= 1 << 3;
++
++    if (fck_divider < 2)
++        reg_value |= 1 << 21;
++    else if (0 != fck_divider)
++        reg_value |= ((fck_divider & 0X1FFF) / 2 - 1) << 8;
++
++    reg_value |= (ddr_mode & 0x01) << 22;
++    reg_value |= 1 << 23;  // set dsp bit
++
++	sdhci_writel(host, reg_value, W3K_SDHCI_CLOCK_CONTROL);
++
++	while(sdhci_readl(host, W3K_SDHCI_CLOCK_CONTROL) & (1<<7) )
++		 asm volatile("nop");
++
++	reg_value = 3 << 1 | 3 << 28;  // reg init value
++	int card_detection_enable = 1, cd_debounce_count = 3;
++
++	reg_value |= card_detection_enable & 0x01;
++    reg_value |= (cd_debounce_count & 0xFF) << 8;
++#define W3K_SDHCI_PIN_REG 0x008	
++	
++#define W3K_SDHCI_CFG_REG 0x014
++	sdhci_writel(host, reg_value, W3K_SDHCI_PIN_REG);
++
++	//data_timeout_set
++	int data_timeout = 1;
++	//emmc_read_mod_write(SD_CFG_REG(emmc), 0xFF, timeout, 24);
++	reg_value = sdhci_readl(host, W3K_SDHCI_CFG_REG);
++	reg_value &= ~(0xff << 24);
++	reg_value |= (data_timeout&0xff) << 24;
++	sdhci_writel(host, reg_value, W3K_SDHCI_CFG_REG);
++
++	// clear interrupt flag
++	reg_value = sdhci_readl(host, W3K_SDHCI_INT_STATUS);
++	sdhci_writel(host, reg_value, W3K_SDHCI_INT_STATUS);
++	//clear dma interrupt flag
++	reg_value = sdhci_readl(host, W3K_SDHCI_DMA_STATUS);
++	sdhci_writel(host, reg_value, W3K_SDHCI_DMA_STATUS);
++
++	//gpio mux for emmc1
++	writel( 1<<7, (void __iomem *)0x3E208018);
++	//sdio enable
++	u32 val = sdhci_readl(host, W3K_SDHCI_CFG_REG);
++	val &=~(0xf << 19);
++	val |= (0xf & 0xf) << 19; 
++	sdhci_writel(host, val, W3K_SDHCI_CFG_REG);
++}
++
++static int w3k_sdhci_init(struct mmc *mmc)
++{
++	struct sdhci_host *host = mmc->priv;
++	/*hw reset*/
++	
++	w3k_sdhci_hw_reset(host);
++	
++	w3k_sdhci_host_init(host);
++
++	if ((host->quirks & SDHCI_QUIRK_32BIT_DMA_ADDR) && !aligned_buffer) {
++		aligned_buffer = memalign(8, 512*1024);
++		if (!aligned_buffer) {
++			debug("%s: Aligned buffer alloc failed!!!\n",
++			       __func__);
++			return -1;
++		}
++	}
++
++	if (host->quirks & SDHCI_QUIRK_32BIT_DMA_ADDR) {
++		host->align_buffer = memalign(8, 512 * 1024);
++		if (!host->align_buffer) {
++			debug("%s: Aligned buffer alloc failed!!!\n",
++			       __func__);
++			return -ENOMEM;
++		}
++	}
++	return 0;
++}
++
++
++
++static int __w3k_sdhci_probe(struct udevice *dev)
++{
++	struct mmc *mmc = mmc_get_mmc_dev(dev);
++
++	return w3k_sdhci_init(mmc);
++}
++
++static int w3k_sdhci_deferred_probe(struct sdhci_host *host)
++{
++	struct udevice *dev = host->mmc->dev;
++	return __w3k_sdhci_probe(dev);
++}
++
++void emmc_fck_divider_set(struct sdhci_host *host, u16 factor)
++{
++	u32 value = sdhci_readl(host, W3K_SDHCI_CLOCK_CONTROL);
++
++	value &= ~(0X3FFF << 8);
++
++    if (factor < 2) {
++        value |= 1 << 21;
++    } else {
++        value |= ((factor & 0x1FFF) / 2 - 1) << 8;
++    }
++	sdhci_writel(host, value , W3K_SDHCI_CLOCK_CONTROL);
++	while(sdhci_readl(host , W3K_SDHCI_CLOCK_CONTROL) & (1<< 7))
++		asm volatile("nop");
++	
++}
++
++static const struct sdhci_ops w3k_sdhci_ops = {
++	.deferred_probe	= w3k_sdhci_deferred_probe,
++};
++
++
++static int w3k_sdhci_probe(struct udevice *dev)
++{
++	struct w3k_sdhci_plat *plat = dev_get_plat(dev);
++	struct mmc_uclass_priv *upriv = dev_get_uclass_priv(dev);
++	struct sdhci_host *host = dev_get_priv(dev);
++	int ret;
++	unsigned int max_clk, min_clk;
++	host->name = dev->name;
++	host->ioaddr = dev_read_addr_ptr(dev);
++	//w3k_mmc_ops = sdhci_ops;
++
++	host->quirks = 0;
++	host->version = SDHCI_SPEC_300;
++	//debug("%s %d: run\n", __func__, __LINE__);
++	ret = mmc_of_parse(dev, &plat->cfg);
++	if (ret){
++		debug("%s %d:error\n", __func__, __LINE__);	
++		return ret;
++	}
++	host->mmc = &plat->mmc;
++	host->mmc->dev = dev;
++	min_clk = W3K_MMC_MIN_CLK;
++	max_clk = host->max_clk = plat->cfg.f_max;
++#if 1
++	ret = sdhci_setup_cfg(&plat->cfg, host, host->max_clk, W3K_MMC_MIN_CLK);
++	if (ret)
++		return ret;
++#else 
++	host->cfg.name = host->name;
++
++	
++
++//	caps = sdhci_readl(host, SDHCI_CAPABILITIES);
++#ifdef CONFIG_MMC_SDMA
++//	if (!(caps & SDHCI_CAN_DO_SDMA)) {
++//		debug("%s: Your controller doesn't support SDMA!!\n",
++//		       __func__);
++//		return -1;
++//	}
++#endif
++
++	if (max_clk)
++		host->cfg.f_max = max_clk;
++	else {
++		if (SDHCI_GET_VERSION(host) >= SDHCI_SPEC_300)
++//			host->cfg.f_max = (caps & SDHCI_CLOCK_V3_BASE_MASK)
++//				>> SDHCI_CLOCK_BASE_SHIFT;
++			host->cfg.f_max = 200;
++		else
++//			host->cfg.f_max = (caps & SDHCI_CLOCK_BASE_MASK)
++//				>> SDHCI_CLOCK_BASE_SHIFT;
++			host->cfg.f_max = 50;
++		host->cfg.f_max *= 1000000;
++	}
++	if (host->cfg.f_max == 0) {
++		debug("%s: Hardware doesn't specify base clock frequency\n",
++		       __func__);
++		return -1;
++	}
++	if (min_clk)
++		host->cfg.f_min = min_clk;
++	else {
++		if (SDHCI_GET_VERSION(host) >= SDHCI_SPEC_300)
++			host->cfg.f_min = host->cfg.f_max /
++				SDHCI_MAX_DIV_SPEC_300;
++		else
++			host->cfg.f_min = host->cfg.f_max /
++				SDHCI_MAX_DIV_SPEC_200;
++	}
++
++	host->cfg.voltages = 0;
++//	if (caps & SDHCI_CAN_VDD_330)
++		host->cfg.voltages |= MMC_VDD_32_33 | MMC_VDD_33_34;
++//	if (caps & SDHCI_CAN_VDD_300)
++//		host->cfg.voltages |= MMC_VDD_29_30 | MMC_VDD_30_31;
++	//if (caps & SDHCI_CAN_VDD_180)
++	//	host->cfg.voltages |= MMC_VDD_165_195;
++
++	if (host->quirks & SDHCI_QUIRK_BROKEN_VOLTAGE)
++		host->cfg.voltages |= host->voltages;
++
++	host->cfg.host_caps = MMC_MODE_HS | MMC_MODE_HS_52MHz | MMC_MODE_4BIT;
++	if (SDHCI_GET_VERSION(host) >= SDHCI_SPEC_300) {
++//		if (caps & SDHCI_CAN_DO_8BIT)
++			host->cfg.host_caps |= MMC_MODE_8BIT;
++	}
++#endif
++	if (host->host_caps)
++		host->cfg.host_caps |= host->host_caps;
++
++	host->cfg.b_max = 512;
++
++	//w3k_sdhci_reset(host, W3K_SDHCI_RESET_ALL);
++
++
++	host->mmc->priv = host;
++	upriv->mmc = host->mmc;
++	host->cfg.b_max = 512;
++	host->ops = &w3k_sdhci_ops;
++
++	ret = __w3k_sdhci_probe(dev);
++	if (ret){
++		debug("%s %d:error\n", __func__, __LINE__);
++		return ret;
++	}
++	emmc_fck_divider_set(host, 2);
++	return ret;
++}
++
++static int w3k_sdhci_of_to_plat(struct udevice *dev)
++{
++	struct sdhci_host *host = dev_get_priv(dev);
++
++	host->name = dev->name;
++	host->ioaddr = dev_read_addr_ptr(dev);
++
++	return 0;
++}
++
++static int w3k_sdhci_bind(struct udevice *dev)
++{
++	struct w3k_sdhci_plat *plat = dev_get_plat(dev);
++
++	return sdhci_bind(dev, &plat->mmc, &plat->cfg);
++}
++
++static const struct udevice_id w3k_sdhci_ids[] = {
++	{ .compatible = "siliconwaves,w3k-sdhci",},
++	{ }
++};
++
++U_BOOT_DRIVER(w3k_sdhci_drv) = {
++	.name		= "w3k_sdhci",
++	.id		= UCLASS_MMC,
++	.of_match	= w3k_sdhci_ids,
++	.of_to_plat = w3k_sdhci_of_to_plat,
++	.ops		= &w3k_mmc_ops,
++	.bind		= w3k_sdhci_bind,
++	.probe		= w3k_sdhci_probe,
++	.priv_auto	= sizeof(struct w3k_sdhci_priv),
++	.plat_auto	= sizeof(struct w3k_sdhci_plat),
++};
+diff --git a/drivers/serial/ns16550.c b/drivers/serial/ns16550.c
+index 7592979cab..2b75ae77f6 100644
+--- a/drivers/serial/ns16550.c
++++ b/drivers/serial/ns16550.c
+@@ -255,11 +255,18 @@ void ns16550_init(struct ns16550 *com_port, int baud_divisor)
+ #if defined(CONFIG_ARCH_OMAP2PLUS) || defined(CONFIG_OMAP_SERIAL)
+ 	serial_out(0x7, &com_port->mdr1);	/* mode select reset TL16C750*/
+ #endif
+-
++#ifdef CONFIG_SILICONWAVES_WAVE3000
++	serial_out(0, &com_port->mcr);
++#else
+ 	serial_out(UART_MCRVAL, &com_port->mcr);
++#endif
+ 	serial_out(ns16550_getfcr(com_port), &com_port->fcr);
+ 	/* initialize serial config to 8N1 before writing baudrate */
++#ifdef CONFIG_SILICONWAVES_WAVE3000
++	serial_out(0, &com_port->lcr);
++#else
+ 	serial_out(UART_LCRVAL, &com_port->lcr);
++#endif
+ 	if (baud_divisor != -1)
+ 		ns16550_setbrg(com_port, baud_divisor);
+ #if defined(CONFIG_ARCH_OMAP2PLUS) || defined(CONFIG_SOC_DA8XX) || \
+@@ -420,16 +427,31 @@ static int ns16550_serial_getc(struct udevice *dev)
+ 	return serial_in(&com_port->rbr);
+ }
+ 
++#ifdef CONFIG_SILICONWAVES_WAVE3000
++static void wave3000_serial_clock_up(struct udevice *dev)
++{
++	struct ns16550 *const com_port = dev_get_priv(dev);
++	struct ns16550_plat *plat = com_port->plat;
++	uint clock_value = (0xfffffff0);
++	unsigned long addr = plat->base + 8;
++	serial_out_shift((void*)addr, 0, clock_value);
++}
++#endif
++
+ static int ns16550_serial_setbrg(struct udevice *dev, int baudrate)
+ {
+ 	struct ns16550 *const com_port = dev_get_priv(dev);
+ 	struct ns16550_plat *plat = com_port->plat;
+ 	int clock_divisor;
+-
++#ifdef CONFIG_SILICONWAVES_WAVE3000
++	clock_divisor = plat->clock/baudrate;
++#else
+ 	clock_divisor = ns16550_calc_divisor(com_port, plat->clock, baudrate);
+-
++#endif
+ 	ns16550_setbrg(com_port, clock_divisor);
+-
++#ifdef CONFIG_SILICONWAVES_WAVE3000
++	wave3000_serial_clock_up(dev);
++#endif
+ 	return 0;
+ }
+ 
+@@ -604,6 +626,7 @@ static const struct udevice_id ns16550_serial_ids[] = {
+ 	{ .compatible = "ingenic,jz4780-uart",	.data = PORT_JZ4780  },
+ 	{ .compatible = "nvidia,tegra20-uart",	.data = PORT_NS16550 },
+ 	{ .compatible = "snps,dw-apb-uart",	.data = PORT_NS16550 },
++	{ .compatible = "siliconwaves,w3k-uart", .data = PORT_NS16550 },
+ 	{}
+ };
+ #endif /* OF_REAL */
+diff --git a/include/configs/siliconwaves-fpga.h b/include/configs/siliconwaves-fpga.h
+new file mode 100644
+index 0000000000..08404d17b5
+--- /dev/null
++++ b/include/configs/siliconwaves-fpga.h
+@@ -0,0 +1,49 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (c) 2023-2024 Siliconwaves, Inc
++ *
++ * Authors:
++ *   Richard Dai <richard@siliconwaves.com>
++ */
++
++#ifndef __SILICONWAVES_FPGA_H
++#define __SILICONWAVES_FPGA_H
++
++#include <linux/sizes.h>
++#define CONFIG_SYS_SDRAM_BASE		0x80000000
++
++#define CONFIG_STANDALONE_LOAD_ADDR	0x80200000
++/* Environment options */
++
++#define BOOT_TARGET_DEVICES(func) \
++	func(MMC, mmc, 0)
++
++#include <config_distro_bootcmd.h>
++
++#define TYPE_GUID_LOADER1	"5B193300-FC78-40CD-8002-E86C45580B47"
++#define TYPE_GUID_LOADER2	"2E54B353-1271-4842-806F-E436D6AF6985"
++#define TYPE_GUID_SYSTEM	"0FC63DAF-8483-4772-8E79-3D69D8477DE4"
++
++#define PARTS_DEFAULT \
++	"name=loader1,start=17K,size=1M,type=${type_guid_gpt_loader1};" \
++	"name=loader2,size=4MB,type=${type_guid_gpt_loader2};" \
++	"name=system,size=-,bootable,type=${type_guid_gpt_system};"
++
++#define CONFIG_EXTRA_ENV_SETTINGS \
++	"kernel_addr_r=0x84000000\0" \
++	"kernel_comp_addr_r=0x88000000\0" \
++	"kernel_comp_size=0x4000000\0" \
++	"fdt_addr_r=0x8c000000\0" \
++	"scriptaddr=0x8c100000\0" \
++	"pxefile_addr_r=0x8c200000\0" \
++	"ramdisk_addr_r=0x8c300000\0" \
++	"type_guid_gpt_loader1=" TYPE_GUID_LOADER1 "\0" \
++	"type_guid_gpt_loader2=" TYPE_GUID_LOADER2 "\0" \
++	"type_guid_gpt_system=" TYPE_GUID_SYSTEM "\0" \
++	"partitions=" PARTS_DEFAULT "\0" \
++	"fdtfile=" CONFIG_DEFAULT_FDT_FILE "\0" \
++	BOOTENV
++
++#define CONFIG_SYS_NS16550_MEM32
++
++#endif /* __SILICONWAVES_FPGA_H */
+-- 
+2.34.1
+

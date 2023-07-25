@@ -1,0 +1,351 @@
+From c35ca6aa20fe6e009d01721eaca0319b191b46a5 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Tue, 25 Jul 2023 14:04:21 +0800
+Subject: [PATCH] support siliconwaves w3k soc
+
+---
+ include/sbi_utils/fdt/fdt_helper.h           |   1 +
+ include/sbi_utils/serial/siliconwaves-uart.h |  18 +++
+ include/sbi_utils/serial/uart8250.h          |   2 +-
+ lib/utils/fdt/fdt_helper.c                   |   6 +
+ lib/utils/irqchip/fdt_irqchip_plic.c         |   1 +
+ lib/utils/serial/fdt_serial.c                |   2 +
+ lib/utils/serial/fdt_serial_siliconwaves.c   |  36 +++++
+ lib/utils/serial/fdt_serial_uart8250.c       |   2 +-
+ lib/utils/serial/objects.mk                  |   3 +
+ lib/utils/serial/siliconwaves-uart.c         | 133 +++++++++++++++++++
+ lib/utils/serial/uart8250.c                  |   4 +-
+ 11 files changed, 204 insertions(+), 4 deletions(-)
+ create mode 100644 include/sbi_utils/serial/siliconwaves-uart.h
+ create mode 100644 lib/utils/serial/fdt_serial_siliconwaves.c
+ create mode 100644 lib/utils/serial/siliconwaves-uart.c
+
+diff --git a/include/sbi_utils/fdt/fdt_helper.h b/include/sbi_utils/fdt/fdt_helper.h
+index 24fee7a..28cdeae 100644
+--- a/include/sbi_utils/fdt/fdt_helper.h
++++ b/include/sbi_utils/fdt/fdt_helper.h
+@@ -31,6 +31,7 @@ struct platform_uart_data {
+ 	unsigned long baud;
+ 	unsigned long reg_shift;
+ 	unsigned long reg_io_width;
++	unsigned long reg_offset;
+ };
+ 
+ const struct fdt_match *fdt_match_node(void *fdt, int nodeoff,
+diff --git a/include/sbi_utils/serial/siliconwaves-uart.h b/include/sbi_utils/serial/siliconwaves-uart.h
+new file mode 100644
+index 0000000..238cbd8
+--- /dev/null
++++ b/include/sbi_utils/serial/siliconwaves-uart.h
+@@ -0,0 +1,18 @@
++/*
++ * SPDX-License-Identifier: BSD-2-Clause
++ *
++ * Copyright (c) 2019 Western Digital Corporation or its affiliates.
++ *
++ * Authors:
++ *   Richard Dai <richard@siliconwaves.com>
++ */
++
++#ifndef __SERIAL_SILICONWAVES_UART_H__
++#define __SERIAL_SILICONWAVES_UART_H__
++
++#include <sbi/sbi_types.h>
++
++int siliconwaves_uart_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
++		  u32 reg_width, u32 reg_offset);
++
++#endif
+diff --git a/include/sbi_utils/serial/uart8250.h b/include/sbi_utils/serial/uart8250.h
+index 6b9b48b..d4a8c13 100644
+--- a/include/sbi_utils/serial/uart8250.h
++++ b/include/sbi_utils/serial/uart8250.h
+@@ -13,6 +13,6 @@
+ #include <sbi/sbi_types.h>
+ 
+ int uart8250_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
+-		  u32 reg_width);
++		  u32 reg_width, u32 reg_offset);
+ 
+ #endif
+diff --git a/lib/utils/fdt/fdt_helper.c b/lib/utils/fdt/fdt_helper.c
+index 5bf4021..96c6678 100644
+--- a/lib/utils/fdt/fdt_helper.c
++++ b/lib/utils/fdt/fdt_helper.c
+@@ -446,6 +446,12 @@ int fdt_parse_uart8250_node(void *fdt, int nodeoffset,
+ 		uart->reg_io_width = fdt32_to_cpu(*val);
+ 	else
+ 		uart->reg_io_width = DEFAULT_UART_REG_IO_WIDTH;
++	
++	val = (fdt32_t *)fdt_getprop(fdt, nodeoffset, "reg-offset", &len);
++	if (len > 0 && val)
++		uart->reg_offset = fdt32_to_cpu(*val);
++	else
++		uart->reg_offset = 0;
+ 
+ 	return 0;
+ }
+diff --git a/lib/utils/irqchip/fdt_irqchip_plic.c b/lib/utils/irqchip/fdt_irqchip_plic.c
+index 8d375be..4c9fddd 100644
+--- a/lib/utils/irqchip/fdt_irqchip_plic.c
++++ b/lib/utils/irqchip/fdt_irqchip_plic.c
+@@ -122,6 +122,7 @@ static void thead_plic_plat_init(struct plic_data *pd)
+ static const struct fdt_match irqchip_plic_match[] = {
+ 	{ .compatible = "riscv,plic0" },
+ 	{ .compatible = "sifive,plic-1.0.0" },
++	{ .compatible = "siliconwaves,w3k-plic" },
+ 	{ .compatible = "thead,c900-plic",
+ 	  .data = thead_plic_plat_init },
+ 	{ },
+diff --git a/lib/utils/serial/fdt_serial.c b/lib/utils/serial/fdt_serial.c
+index f73d26a..b81f098 100644
+--- a/lib/utils/serial/fdt_serial.c
++++ b/lib/utils/serial/fdt_serial.c
+@@ -14,6 +14,7 @@
+ #include <sbi_utils/serial/fdt_serial.h>
+ 
+ extern struct fdt_serial fdt_serial_uart8250;
++extern struct fdt_serial fdt_serial_siliconwaves;
+ extern struct fdt_serial fdt_serial_sifive;
+ extern struct fdt_serial fdt_serial_litex;
+ extern struct fdt_serial fdt_serial_htif;
+@@ -23,6 +24,7 @@ extern struct fdt_serial fdt_serial_gaisler;
+ static struct fdt_serial *serial_drivers[] = {
+ 	&fdt_serial_uart8250,
+ 	&fdt_serial_sifive,
++	&fdt_serial_siliconwaves,
+ 	&fdt_serial_litex,
+ 	&fdt_serial_htif,
+ 	&fdt_serial_shakti,
+diff --git a/lib/utils/serial/fdt_serial_siliconwaves.c b/lib/utils/serial/fdt_serial_siliconwaves.c
+new file mode 100644
+index 0000000..00c67a4
+--- /dev/null
++++ b/lib/utils/serial/fdt_serial_siliconwaves.c
+@@ -0,0 +1,36 @@
++/*
++ * SPDX-License-Identifier: BSD-2-Clause
++ *
++ * Copyright (c) 2020 Western Digital Corporation or its affiliates.
++ *
++ * Authors:
++ *   Anup Patel <anup.patel@wdc.com>
++ */
++
++#include <sbi_utils/fdt/fdt_helper.h>
++#include <sbi_utils/serial/fdt_serial.h>
++#include <sbi_utils/serial/siliconwaves-uart.h>
++
++static int serial_siliconwaves_uart_init(void *fdt, int nodeoff,
++				const struct fdt_match *match)
++{
++	int rc;
++	struct platform_uart_data uart;
++
++	rc = fdt_parse_uart8250_node(fdt, nodeoff, &uart);
++	if (rc)
++		return rc;
++
++	return siliconwaves_uart_init(uart.addr, uart.freq, uart.baud,
++			     uart.reg_shift, uart.reg_io_width, uart.reg_offset);
++}
++
++static const struct fdt_match serial_siliconwaves_uart_match[] = {
++	{ .compatible = "siliconwaves,w3k-uart" },
++	{ },
++};
++
++struct fdt_serial fdt_serial_siliconwaves = {
++	.match_table = serial_siliconwaves_uart_match,
++	.init = serial_siliconwaves_uart_init,
++};
+diff --git a/lib/utils/serial/fdt_serial_uart8250.c b/lib/utils/serial/fdt_serial_uart8250.c
+index 36f364c..60b4c4a 100644
+--- a/lib/utils/serial/fdt_serial_uart8250.c
++++ b/lib/utils/serial/fdt_serial_uart8250.c
+@@ -22,7 +22,7 @@ static int serial_uart8250_init(void *fdt, int nodeoff,
+ 		return rc;
+ 
+ 	return uart8250_init(uart.addr, uart.freq, uart.baud,
+-			     uart.reg_shift, uart.reg_io_width);
++			     uart.reg_shift, uart.reg_io_width, uart.reg_offset);
+ }
+ 
+ static const struct fdt_match serial_uart8250_match[] = {
+diff --git a/lib/utils/serial/objects.mk b/lib/utils/serial/objects.mk
+index 4f751ba..d1a3ce0 100644
+--- a/lib/utils/serial/objects.mk
++++ b/lib/utils/serial/objects.mk
+@@ -14,8 +14,11 @@ libsbiutils-objs-y += serial/fdt_serial_shakti.o
+ libsbiutils-objs-y += serial/fdt_serial_sifive.o
+ libsbiutils-objs-y += serial/fdt_serial_litex.o
+ libsbiutils-objs-y += serial/fdt_serial_uart8250.o
++libsbiutils-objs-y += serial/fdt_serial_siliconwaves.o
++libsbiutils-objs-y += serial/gaisler-uart.o
+ libsbiutils-objs-y += serial/gaisler-uart.o
+ libsbiutils-objs-y += serial/shakti-uart.o
+ libsbiutils-objs-y += serial/sifive-uart.o
+ libsbiutils-objs-y += serial/litex-uart.o
+ libsbiutils-objs-y += serial/uart8250.o
++libsbiutils-objs-y += serial/siliconwaves-uart.o
+\ No newline at end of file
+diff --git a/lib/utils/serial/siliconwaves-uart.c b/lib/utils/serial/siliconwaves-uart.c
+new file mode 100644
+index 0000000..697c9ea
+--- /dev/null
++++ b/lib/utils/serial/siliconwaves-uart.c
+@@ -0,0 +1,133 @@
++/*
++ * SPDX-License-Identifier: BSD-2-Clause
++ *
++ * Copyright (c) 2019 Western Digital Corporation or its affiliates.
++ *
++ * Authors:
++ *   Richard Dai <richard@siliconwaves.com>
++ */
++
++#include <sbi/riscv_io.h>
++#include <sbi/sbi_console.h>
++#include <sbi_utils/serial/siliconwaves-uart.h>
++
++/* clang-format off */
++
++#define UART_RBR_OFFSET		0	/* In:  Recieve Buffer Register */
++#define UART_THR_OFFSET		0	/* Out: Transmitter Holding Register */
++#define UART_DLL_OFFSET		0	/* Out: Divisor Latch Low */
++#define UART_IER_OFFSET		1	/* I/O: Interrupt Enable Register */
++#define UART_DLM_OFFSET		1	/* Out: Divisor Latch High */
++#define UART_FCR_OFFSET		2	/* Out: FIFO Control Register */
++#define UART_IIR_OFFSET		2	/* I/O: Interrupt Identification Register */
++#define UART_LCR_OFFSET		3	/* Out: Line Control Register */
++#define UART_MCR_OFFSET		4	/* Out: Modem Control Register */
++#define UART_LSR_OFFSET		5	/* In:  Line Status Register */
++#define UART_MSR_OFFSET		6	/* In:  Modem Status Register */
++#define UART_SCR_OFFSET		7	/* I/O: Scratch Register */
++#define UART_MDR1_OFFSET	8	/* I/O:  Mode Register */
++
++#define UART_LSR_FIFOE		0x80	/* Fifo error */
++#define UART_LSR_TEMT		0x40	/* Transmitter empty */
++#define UART_LSR_THRE		0x20	/* Transmit-hold-register empty */
++#define UART_LSR_BI		0x10	/* Break interrupt indicator */
++#define UART_LSR_FE		0x08	/* Frame error indicator */
++#define UART_LSR_PE		0x04	/* Parity error indicator */
++#define UART_LSR_OE		0x02	/* Overrun error indicator */
++#define UART_LSR_DR		0x01	/* Receiver data ready */
++#define UART_LSR_BRK_ERROR_BITS	0x1E	/* BI, FE, PE, OE bits */
++
++/* clang-format on */
++
++static volatile void *siliconwaves_uart_base;
++static u32 siliconwaves_uart_in_freq;
++static u32 siliconwaves_uart_baudrate;
++static u32 siliconwaves_uart_reg_width;
++static u32 siliconwaves_uart_reg_shift;
++
++static u32 get_reg(u32 num)
++{
++	u32 offset = num << siliconwaves_uart_reg_shift;
++
++	if (siliconwaves_uart_reg_width == 1)
++		return readb(siliconwaves_uart_base + offset);
++	else if (siliconwaves_uart_reg_width == 2)
++		return readw(siliconwaves_uart_base + offset);
++	else
++		return readl(siliconwaves_uart_base + offset);
++}
++
++static void set_reg(u32 num, u32 val)
++{
++	u32 offset = num << siliconwaves_uart_reg_shift;
++
++	if (siliconwaves_uart_reg_width == 1)
++		writeb(val, siliconwaves_uart_base + offset);
++	else if (siliconwaves_uart_reg_width == 2)
++		writew(val, siliconwaves_uart_base + offset);
++	else
++		writel(val, siliconwaves_uart_base + offset);
++}
++
++static void siliconwaves_uart_putc(char ch)
++{
++	while ((get_reg(UART_LSR_OFFSET) & UART_LSR_THRE) == 0)
++		;
++
++	set_reg(UART_THR_OFFSET, ch);
++}
++
++static int siliconwaves_uart_getc(void)
++{
++	if (get_reg(UART_LSR_OFFSET) & UART_LSR_DR)
++		return get_reg(UART_RBR_OFFSET);
++	return -1;
++}
++
++static struct sbi_console_device siliconwaves_uart_console = {
++	.name = "w3k_uart",
++	.console_putc = siliconwaves_uart_putc,
++	.console_getc = siliconwaves_uart_getc
++};
++
++int siliconwaves_uart_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
++		  u32 reg_width, u32 reg_offset)
++{
++	u16 bdiv;
++	siliconwaves_uart_base      = (volatile void *)base + reg_offset;
++	siliconwaves_uart_reg_shift = reg_shift;
++	siliconwaves_uart_reg_width = reg_width;
++	siliconwaves_uart_in_freq   = in_freq;
++	siliconwaves_uart_baudrate  = baudrate;
++
++	bdiv = siliconwaves_uart_in_freq / (siliconwaves_uart_baudrate);
++
++	/* Disable all interrupts */
++	set_reg(UART_IER_OFFSET, 0x00);
++	/* Enable DLAB */
++	set_reg(UART_LCR_OFFSET, 0x80);
++
++	if (bdiv) {
++		/* Set divisor low byte */
++		set_reg(UART_DLL_OFFSET, bdiv & 0xff);
++		/* Set divisor high byte */
++		set_reg(UART_DLM_OFFSET, (bdiv >> 8) & 0xff);
++	}
++
++	/* 8 bits, no parity, one stop bit */
++	set_reg(UART_LCR_OFFSET, 0x03);
++	/* Enable FIFO */
++	set_reg(UART_FCR_OFFSET, 0x01);
++	/* No modem control DTR RTS */
++	set_reg(UART_MCR_OFFSET, 0x00);
++	/* Clear line status */
++	get_reg(UART_LSR_OFFSET);
++	/* Read receive buffer */
++	get_reg(UART_RBR_OFFSET);
++	/* Set scratchpad */
++	set_reg(UART_SCR_OFFSET, 0x00);
++
++	sbi_console_set_device(&siliconwaves_uart_console);
++
++	return 0;
++}
+diff --git a/lib/utils/serial/uart8250.c b/lib/utils/serial/uart8250.c
+index 1cf6624..fd2d7f2 100644
+--- a/lib/utils/serial/uart8250.c
++++ b/lib/utils/serial/uart8250.c
+@@ -91,11 +91,11 @@ static struct sbi_console_device uart8250_console = {
+ };
+ 
+ int uart8250_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
+-		  u32 reg_width)
++		  u32 reg_width, u32 reg_offset)
+ {
+ 	u16 bdiv;
+ 
+-	uart8250_base      = (volatile void *)base;
++	uart8250_base      = (volatile void *)base + reg_offset;
+ 	uart8250_reg_shift = reg_shift;
+ 	uart8250_reg_width = reg_width;
+ 	uart8250_in_freq   = in_freq;
+-- 
+2.34.1
+
