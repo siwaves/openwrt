@@ -12,9 +12,9 @@ include $(INCLUDE_DIR)/kernel.mk
 PKG_VERSION:=2023.01
 
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/siwaves/u-boot
-PKG_SOURCE_VERSION:=e702f8843b9e90fac07d6ae728d1bc1a520126c4
-PKG_MIRROR_HASH:=ba9c699a97cbe92c67a415032dd8453bb1f516b219ac9c8959115c547e646063
+PKG_SOURCE_URL:=https://github.com/u-boot/u-boot
+PKG_SOURCE_VERSION:=62e2ad1ceafbfdf2c44d3dc1b6efc81e768a96b9
+PKG_MIRROR_HASH:=be7454f322cac97fbe6613fcde6ff7d20560dd6dae2a2e55ccc0d179129a5195
 
 OPENSBI:=$(STAGING_DIR_IMAGE)/fw_dynamic.bin
 
@@ -28,7 +28,7 @@ define U-Boot/Default
 endef
 
 define U-Boot/siliconwaves_fpga
-  NAME:=w3k-fpga
+  NAME:=siliconwaves-fpga
   BUILD_SUBTARGET:=w3k
   BUILD_DEVICES:=siliconwaves-w3k-fpga
   DEPENDS:= +opensbi-siliconwaves

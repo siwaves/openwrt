@@ -1,3 +1,14 @@
+From cc41bb0af8ce75c088f7c5ce1bf17c2f0b00c887 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richarddai@163.com>
+Date: Mon, 3 Jul 2023 14:36:05 +0800
+Subject: [PATCH] Makefile: fix build with binutils 2.38
+
+---
+ Makefile | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 062883e..c3eb635 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -153,6 +153,9 @@ OPENSBI_LD_PIE := $(shell $(CC) $(CLANG_TARGET) $(RELAX_FLAG) $(USE_LD_FLAG) -fP
