@@ -139,3 +139,25 @@ make V=s -j72
 编译成功后，在 bin/targets/siliconwaves/w3k/ 目录下会生成 openwrt-siliconwaves-w3k-siliconwaves-w3k-fpga-ext4-factory.img.gz 软件。
 
 作为参考，在环境2下，整个编译过程大概花了25分钟。
+
+# 4. 制作w3k-fpga openwrt的启动卡
+
+将sd卡插入读卡器，读卡器连接到ubuntu主机，然后执行命令**ls /dev/sd***, 确认是哪个描述符时sd卡。
+制作启动卡的命令如下：
+```
+zcat openwrt-siliconwaves-w3k-siliconwaves-w3k-fpga-ext4-factory.img.gz | sudo dd of=/dev/sdX bs=512K iflag=fullblock conv=fsync status=progress
+```
+X替换为实际的磁盘名字即可。
+执行完上述命令，启动磁盘就制作好了。
+```
+$ ls /dev/sdb*
+/dev/sdb  /dev/sdb1  /dev/sdb2  /dev/sdb3  /dev/sdb4
+```
+磁盘有4个分区
+| 分区 | 内容 |
+|-----------|------|
+|1|	u-boot-spl.bin|
+|2|	u-boot.itb|
+|3|	linux的内核以及设备树|
+|4|	ext4格式的openwrt文件系统|
+
