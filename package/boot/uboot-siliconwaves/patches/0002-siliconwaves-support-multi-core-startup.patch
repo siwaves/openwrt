@@ -1,0 +1,53 @@
+From 665caa4d19feb55a135117766097b4b7427f3e31 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Thu, 27 Jul 2023 18:48:04 +0800
+Subject: [PATCH 1/2] siliconwaves: support multi-core startup
+
+Signed-off-by: Richard Dai <richard@siliconwaves.com>
+---
+ arch/riscv/cpu/start.S | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/arch/riscv/cpu/start.S b/arch/riscv/cpu/start.S
+index 4687bca3c9..e955f8a78b 100644
+--- a/arch/riscv/cpu/start.S
++++ b/arch/riscv/cpu/start.S
+@@ -40,6 +40,35 @@ secondary_harts_relocation_error:
+ .section .text
+ .globl _start
+ _start:
++#ifdef CONFIG_SPL_BUILD
++	csrr t1, mhartid
++	li t5, 0x1
++	bne t1, zero, 3f
++1: //hart 0
++	li t0, 0x400c0000
++	li t1, 0x1
++	sw t1, 0(t0)
++	fence ow, ow
++2:
++	li t0,0x400c0004
++	fence ir,ir
++	lw t1, 0(t0)
++	beq t1, t5, 9f
++	bne t1, t5, 2b
++
++3: //hart1
++	li t2, 0x400c0004
++	li t3, 0x1
++	sw t3, 0(t2)
++	fence ow, ow
++4:
++	li t2,0x400c0000
++	fence ir,ir
++	lw t3, 0(t2)
++	bne t3, t5, 4b
++9:
++#endif
++
+ #if CONFIG_IS_ENABLED(RISCV_MMODE)
+ 	csrr	a0, CSR_MHARTID
+ #endif
+-- 
+2.34.1
+

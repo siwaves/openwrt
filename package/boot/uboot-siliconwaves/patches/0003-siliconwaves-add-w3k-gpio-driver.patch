@@ -1,0 +1,433 @@
+From fedc89f04846a34e4cee8c87e11db512cdbd95e8 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Thu, 27 Jul 2023 18:48:49 +0800
+Subject: [PATCH 2/2] siliconwaves: add w3k gpio driver
+
+Signed-off-by: Richard Dai <richard@siliconwaves.com>
+---
+ arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi |   4 +
+ arch/riscv/dts/siliconwaves-fpga.dts         |   6 +
+ arch/riscv/dts/wave3000.dtsi                 |   6 +
+ arch/riscv/include/asm/arch-wave3000/gpio.h  |  28 ++++
+ arch/riscv/lib/bootm.c                       |   7 +-
+ board/siliconwaves/fpga/fpga.c               |  32 +++-
+ board/siliconwaves/fpga/spl.c                |  27 +++-
+ configs/siliconwaves_fpga_defconfig          |   1 +
+ drivers/gpio/Kconfig                         |   7 +
+ drivers/gpio/Makefile                        |   1 +
+ drivers/gpio/siliconwaves-gpio.c             | 157 +++++++++++++++++++
+ 11 files changed, 270 insertions(+), 6 deletions(-)
+ create mode 100644 arch/riscv/include/asm/arch-wave3000/gpio.h
+ create mode 100644 drivers/gpio/siliconwaves-gpio.c
+
+diff --git a/arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi b/arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi
+index 3c1f6b286a..af194e59d5 100644
+--- a/arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi
++++ b/arch/riscv/dts/siliconwaves-fpga-u-boot.dtsi
+@@ -19,3 +19,7 @@
+ &clint {
+ 	clocks = <&rtcclk>;
+ };
++
++&gpio {
++	u-boot,dm-spl;
++};
+diff --git a/arch/riscv/dts/siliconwaves-fpga.dts b/arch/riscv/dts/siliconwaves-fpga.dts
+index 15703c5dd9..69a46b4b86 100644
+--- a/arch/riscv/dts/siliconwaves-fpga.dts
++++ b/arch/riscv/dts/siliconwaves-fpga.dts
+@@ -45,3 +45,9 @@
+ &sdhci0{
+ 	status = "okay";
+ };
++
++&gpio {
++	status = "okay";
++	gpio-line-names = "led0", "led1", "led2", "led3", "led4",
++		"led5", "led6", "led7";
++};
+diff --git a/arch/riscv/dts/wave3000.dtsi b/arch/riscv/dts/wave3000.dtsi
+index 7cad266427..d29cda019b 100644
+--- a/arch/riscv/dts/wave3000.dtsi
++++ b/arch/riscv/dts/wave3000.dtsi
+@@ -114,5 +114,11 @@
+ 			cap-mmc-highspeed;
+ 			status = "disabled";
+ 		};
++		gpio: gpio@3e204000 {
++			compatible = "siliconwaves,gpio0";
++			reg = <0x0 0x3e204000 0x0 0x1000>;
++			gpio-controller;
++			status = "disabled";
++		};
+ 	};
+ };
+diff --git a/arch/riscv/include/asm/arch-wave3000/gpio.h b/arch/riscv/include/asm/arch-wave3000/gpio.h
+new file mode 100644
+index 0000000000..75f2b22149
+--- /dev/null
++++ b/arch/riscv/include/asm/arch-wave3000/gpio.h
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2023-2024 Siliconwaves, Inc.
++ */
++
++#ifndef _GPIO_SILICONWAVES_H
++#define _GPIO_SILICONWAVES_H
++
++#define GPIO_INPUT_EN	0x00
++#define GPIO_OUTPUT_EN	0x00
++#define GPIO_INPUT_BIT	0x02
++#define GPIO_OUTPUT_BIT	0x02
++#define GPIO_OUT_REG_OFFSET 0x88
++#define GPIO_IN_REG_OFFSET 0x8C
++
++#define NR_GPIOS	8
++
++enum gpio_state {
++	LOW,
++	HIGH
++};
++
++/* Details about a GPIO bank */
++struct siliconwaves_gpio_plat {
++	void *base;     /* address of registers in physical memory */
++};
++
++#endif /* _GPIO_SILICONWAVES_H */
+diff --git a/arch/riscv/lib/bootm.c b/arch/riscv/lib/bootm.c
+index f5f8b4c733..34334e1cd9 100644
+--- a/arch/riscv/lib/bootm.c
++++ b/arch/riscv/lib/bootm.c
+@@ -28,7 +28,9 @@ DECLARE_GLOBAL_DATA_PTR;
+ __weak void board_quiesce_devices(void)
+ {
+ }
+-
++#ifdef CONFIG_SILICONWAVES_GPIO
++extern int siwaves_led_lightup(const char *label, int pin);
++#endif
+ /**
+  * announce_and_cleanup() - Print message and prepare for kernel boot
+  *
+@@ -36,6 +38,9 @@ __weak void board_quiesce_devices(void)
+  */
+ static void announce_and_cleanup(int fake)
+ {
++#ifdef CONFIG_SILICONWAVES_GPIO
++	siwaves_led_lightup("led5", 5);
++#endif
+ 	printf("\nStarting kernel ...%s\n\n", fake ?
+ 		"(fake run for tracing)" : "");
+ 	bootstage_mark_name(BOOTSTAGE_ID_BOOTM_HANDOFF, "start_kernel");
+diff --git a/board/siliconwaves/fpga/fpga.c b/board/siliconwaves/fpga/fpga.c
+index 6295deeae2..2be587abc8 100644
+--- a/board/siliconwaves/fpga/fpga.c
++++ b/board/siliconwaves/fpga/fpga.c
+@@ -1,9 +1,9 @@
+ // SPDX-License-Identifier: GPL-2.0+
+ /*
+- * Copyright (c) 2020-2021, SiFive Inc
++ * Copyright (c) 2023-2024, Siliconwaves Inc
+  *
+  * Authors:
+- *   Pragnesh Patel <pragnesh.patel@sifive.com>
++ *   Richard Dai <richard@siliconwaves.com>
+  */
+ 
+ #include <common.h>
+@@ -11,6 +11,30 @@
+ #include <dm.h>
+ #include <asm/sections.h>
+ 
++#ifdef CONFIG_SILICONWAVES_GPIO
++#include <asm/gpio.h>
++
++int siwaves_led_lightup(const char *label, int pin)
++{
++	int ret;
++
++	ret = gpio_request(pin, label);
++	if (ret) {
++		printf("%s gpio request failed: %d\n", label, ret);
++		return ret;
++	}
++
++	ret = gpio_direction_output(pin, 1);
++	if (ret) {
++		printf("%s gpio direction set failed: %d\n", label, ret);
++		return ret;
++	}
++	gpio_set_value(pin, 1);
++
++	return ret;
++}
++#endif
++
+ void *board_fdt_blob_setup(int *err)
+ {
+ 	*err = 0;
+@@ -26,6 +50,8 @@ int board_init(void)
+ {
+ 	/* enable all cache ways */
+ 	enable_caches();
+-
++#ifdef CONFIG_SILICONWAVES_GPIO
++	siwaves_led_lightup("led6", 6);
++#endif
+ 	return 0;
+ }
+diff --git a/board/siliconwaves/fpga/spl.c b/board/siliconwaves/fpga/spl.c
+index bfc52bbef0..cda5ebf966 100644
+--- a/board/siliconwaves/fpga/spl.c
++++ b/board/siliconwaves/fpga/spl.c
+@@ -1,9 +1,9 @@
+ // SPDX-License-Identifier: GPL-2.0+
+ /*
+- * Copyright (c) 2020-2021 SiFive, Inc
++ * Copyright (c) 2023-2024 Siliconwaves, Inc
+  *
+  * Authors:
+- *   Pragnesh Patel <pragnesh.patel@sifive.com>
++ *   Richard Dai <richard@siliconwaves.com>
+  */
+ 
+ #include <init.h>
+@@ -15,6 +15,26 @@
+ #include <asm/gpio.h>
+ #include <asm/arch/spl.h>
+ 
++static inline int spl_led_lightup(const char *label, int pin)
++{
++	int ret;
++
++	ret = gpio_request(pin, label);
++	if (ret) {
++		printf("%s gpio request failed: %d\n", label, ret);
++		return ret;
++	}
++
++	ret = gpio_direction_output(pin, 1);
++	if (ret) {
++		printf("%s gpio direction set failed: %d\n", label, ret);
++		return ret;
++	}
++	gpio_set_value(pin, 1);
++
++	return ret;
++}
++
+ int spl_board_init_f(void)
+ {
+ 	/*nothing init*/
+@@ -23,6 +43,9 @@ int spl_board_init_f(void)
+ 
+ u32 spl_boot_device(void)
+ {
++#ifdef CONFIG_SILICONWAVES_GPIO
++	spl_led_lightup("led7", 7);
++#endif
+ 	debug("trying boot from MMC1\n");
+ 	return BOOT_DEVICE_MMC1;
+ }
+diff --git a/configs/siliconwaves_fpga_defconfig b/configs/siliconwaves_fpga_defconfig
+index 49ac9290b5..3791590fd4 100644
+--- a/configs/siliconwaves_fpga_defconfig
++++ b/configs/siliconwaves_fpga_defconfig
+@@ -50,3 +50,4 @@ CONFIG_EVENT_DEBUG=y
+ CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_USE_SECTOR=y
+ CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR=0x822
+ CONFIG_SPL_OPENSBI_SCRATCH_OPTIONS=0x0
++CONFIG_SILICONWAVES_GPIO=y
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index ff87fbfb39..cb731b35ac 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -616,4 +616,11 @@ config ADP5585_GPIO
+ 	help
+ 	  Support ADP5585 GPIO expander.
+ 
++config SILICONWAVES_GPIO
++	bool "Siliconwaves GPIO driver"
++	depends on DM_GPIO
++	help
++	  Device model driver for GPIO controller present in siliconwaves w3k SoC. This
++	  driver enables GPIO interface on siliconwaves w3k fpga board.
++
+ endif
+diff --git a/drivers/gpio/Makefile b/drivers/gpio/Makefile
+index 7235714fcc..099ac47fd7 100644
+--- a/drivers/gpio/Makefile
++++ b/drivers/gpio/Makefile
+@@ -77,3 +77,4 @@ obj-$(CONFIG_SLG7XL45106_I2C_GPO)	+= gpio_slg7xl45106.o
+ obj-$(CONFIG_$(SPL_TPL_)TURRIS_OMNIA_MCU)	+= turris_omnia_mcu.o
+ obj-$(CONFIG_FTGPIO010)		+= ftgpio010.o
+ obj-$(CONFIG_ADP5585_GPIO)	+= adp5585_gpio.o
++obj-$(CONFIG_SILICONWAVES_GPIO)	+= siliconwaves-gpio.o
+diff --git a/drivers/gpio/siliconwaves-gpio.c b/drivers/gpio/siliconwaves-gpio.c
+new file mode 100644
+index 0000000000..bcbf505cac
+--- /dev/null
++++ b/drivers/gpio/siliconwaves-gpio.c
+@@ -0,0 +1,157 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Siliconwaves GPIO driver
++ *
++ * Copyright (C) 2023 Siliconwaves, Inc.
++ */
++
++#include <common.h>
++#include <dm.h>
++#include <asm/arch/gpio.h>
++#include <asm/io.h>
++#include <errno.h>
++#include <asm/gpio.h>
++#include <linux/bitops.h>
++
++static int siliconwaves_gpio_probe(struct udevice *dev)
++{
++	struct siliconwaves_gpio_plat *plat = dev_get_plat(dev);
++	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
++	char name[18], *str;
++
++	sprintf(name, "gpio@%4lx_", (uintptr_t)plat->base);
++	str = strdup(name);
++	if (!str)
++		return -ENOMEM;
++	uc_priv->bank_name = str;
++
++	/*
++	 * Use the gpio count mentioned in device tree,
++	 * if not specified in dt, set NR_GPIOS as default
++	 */
++	uc_priv->gpio_count = dev_read_u32_default(dev, "ngpios", NR_GPIOS);
++
++	return 0;
++}
++
++static void siliconwaves_update_gpio_reg(void *bptr, u32 reg_offset, 
++	u32 bit, bool value)
++{
++	void __iomem *ptr = (void __iomem *)bptr + reg_offset;
++	u32 old = readl(ptr);
++
++	if (value)
++		writel(old | (1<<bit), ptr);
++	else
++		writel(old & ~(1<<bit), ptr);
++}
++
++static int siliconwaves_gpio_direction_input(struct udevice *dev, u32 gpio)
++{
++	struct siliconwaves_gpio_plat *plat = dev_get_plat(dev);
++	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
++
++	if (gpio > uc_priv->gpio_count)
++		return -EINVAL;
++
++	/* Configure gpio direction as input */
++	siliconwaves_update_gpio_reg(plat->base, GPIO_INPUT_EN + gpio * 4, 
++		GPIO_INPUT_BIT , true);
++	return 0;
++}
++
++static int siliconwaves_gpio_direction_output(struct udevice *dev, u32 gpio,
++					int value)
++{
++	struct siliconwaves_gpio_plat *plat = dev_get_plat(dev);
++	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
++
++	if (gpio > uc_priv->gpio_count)
++		return -EINVAL;
++
++	/* Configure gpio direction as output */
++	siliconwaves_update_gpio_reg(plat->base, GPIO_OUTPUT_EN + gpio * 4, 
++		GPIO_INPUT_BIT , false);
++
++	return 0;
++}
++
++static int siliconwaves_gpio_get_value(struct udevice *dev, u32 offset)
++{
++	struct siliconwaves_gpio_plat *plat = dev_get_plat(dev);
++	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
++	int val;
++	
++	if (offset > uc_priv->gpio_count)
++		return -EINVAL;
++
++	val = readl(plat->base + GPIO_IN_REG_OFFSET) & BIT(offset);
++	return val ? HIGH : LOW;
++}
++
++static int siliconwaves_gpio_set_value(struct udevice *dev, u32 gpio, int value)
++{
++	struct siliconwaves_gpio_plat *plat = dev_get_plat(dev);
++	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
++
++	if (gpio > uc_priv->gpio_count)
++		return -EINVAL;
++	siliconwaves_update_gpio_reg(plat->base, GPIO_OUT_REG_OFFSET, gpio, value);
++	return 0;
++}
++
++static int siliconwaves_gpio_get_function(struct udevice *dev, unsigned int offset)
++{
++	struct siliconwaves_gpio_plat *plat = dev_get_plat(dev);
++	u32	indir, val;
++	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
++
++	if (offset > uc_priv->gpio_count)
++		return -1;
++
++	/* Get direction of the pin */
++	indir = readl(plat->base + GPIO_OUTPUT_EN + offset*4) & BIT(2);
++
++	if (!indir)
++		/* Pin at specified offset is configured as output */
++		val = GPIOF_OUTPUT;
++	else
++		/* Pin at specified offset is configured as input */
++		val = GPIOF_INPUT;
++
++	return val;
++}
++
++static const struct udevice_id siliconwaves_gpio_match[] = {
++	{ .compatible = "siliconwaves,gpio0" },
++	{ }
++};
++
++static const struct dm_gpio_ops siliconwaves_gpio_ops = {
++	.direction_input        = siliconwaves_gpio_direction_input,
++	.direction_output       = siliconwaves_gpio_direction_output,
++	.get_value              = siliconwaves_gpio_get_value,
++	.set_value              = siliconwaves_gpio_set_value,
++	.get_function		= siliconwaves_gpio_get_function,
++};
++
++static int siliconwaves_gpio_of_to_plat(struct udevice *dev)
++{
++	struct siliconwaves_gpio_plat *plat = dev_get_plat(dev);
++
++	plat->base = dev_read_addr_ptr(dev);
++	if (!plat->base)
++		return -EINVAL;
++
++	return 0;
++}
++
++U_BOOT_DRIVER(gpio_siliconwaves) = {
++	.name	= "gpio_siliconwaves",
++	.id	= UCLASS_GPIO,
++	.of_match = siliconwaves_gpio_match,
++	.of_to_plat = of_match_ptr(siliconwaves_gpio_of_to_plat),
++	.plat_auto	= sizeof(struct siliconwaves_gpio_plat),
++	.ops	= &siliconwaves_gpio_ops,
++	.probe	= siliconwaves_gpio_probe,
++};
+-- 
+2.34.1
+
