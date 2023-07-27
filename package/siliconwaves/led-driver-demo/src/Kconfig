@@ -1,0 +1,9 @@
+config SILICONWAVES_LED_DRIVER_DEMO
+	tristate "siliconwaves test led driver"
+	---help---
+	  led driver test.
+
+	  To compile this code as a module, choose M here: the module will be
+	  called led driver demo.
+
+	  If unsure, say N.
