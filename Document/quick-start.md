@@ -109,7 +109,7 @@ git checkout openwrt-22.03-linux-5.10.168
 
 为加速编译过程，部分文件已打包上传到云端，这样一次下载后，无需在每次编译过程中通过网络下载这些文件。
 
-链接：https://share.weiyun.com/Gxg9j4Ud 密码：muj8jr
+链接: [dl-linux-5.10.168.tar.bz2](https://pan.baidu.com/s/1yEapoGykTx4CRlDB_UNESg)
 
 下载好之后，放到openwrt目录，然后执行命令解压：
 
