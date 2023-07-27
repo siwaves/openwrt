@@ -161,3 +161,70 @@ $ ls /dev/sdb*
 |3|	linux的内核以及设备树|
 |4|	ext4格式的openwrt文件系统|
 
+# 5. 调试与开发
+
+串口线连接到开发板后，设置串口线的波特率的为115200n8
+
+使用xilinx vivado工具烧录bit文件后，系统将自动启动，串口可以看到如下输出日志：
+```
+U-Boot SPL 2023.01-OpenWrt-r20114-e16929bddf (Jul 27 2023 - 09:25:19 +0000)
+Trying to boot from MMC1
+
+OpenSBI v1.0
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : Siliconwaves w3k fpag board
+Platform Features         : medeleg
+Platform HART Count       : 2
+Platform IPI Device       : aclint-mswi
+......
+```
+
+在板子上，软件可以控制8个LED
+| LED编号 | 作用 |
+|-----------|------|
+|0|用户使用|
+|1|用户使用|
+|2|用户使用|
+|3|用户使用|
+|4|linux内核启动完成后点亮|
+|5|u-boot跳转到内核前点亮|
+|6|u-boot启动过程中点亮|
+|7|u-boot-spl点亮|
+
+下图为FPGA board上8个LED的分布示意图：
+![](./pictures/fpga-w3k-led.png)
+
+上图为openwrt启动正常启动后的示意图。
+
+示例代码：
+[led-driver-demo](https://github.com/siwaves/openwrt/tree/openwrt-22.03-linux-5.10.168/package/siliconwaves/led-driver-demo)[led-user-demo](https://github.com/siwaves/openwrt/tree/openwrt-22.03-linux-5.10.168/package/siliconwaves/led-user-demo)是一对示例代码。
+默认这两个程序是编译到openwrt中的。
+当openwrt启动后，可以执行led-lightup命令控制0-3编号的LED
+```
+# led-lightup -h
+Usage:led-lightup [-hnv] [-n gpio-num 0-3][-v on-off 0/1]
+```
+例：
+
+**led-lightup -n 2 -v 1** 点亮编号为2的LED
+
+**led-lightup -n 3 -v 0** 熄灭编号为3的LED
+
+
+openwrt的软件更新的方式：
+1. 将sd卡拔出，插入到linux系统，使用mount命令挂载文件系统，将需要的软件拷贝到sd卡上，然后重新启动系统。x代表具体的磁盘符号
+   ```
+   $ sudo mount /dev/sdX4 /mnt/
+   $ ls /mnt/
+	bin  dev  etc  lib  lib64  lost+found  mnt  overlay  proc  rom  root  sbin  sys  tmp  usr  var  www
+   ```
+2. 将软件编译到openwrt生成的压缩文件中，然后使用第4条的方法，进行整个磁盘的升级。
+
