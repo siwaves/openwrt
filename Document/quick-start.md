@@ -161,7 +161,16 @@ $ ls /dev/sdb*
 |3|	linux的内核以及设备树|
 |4|	ext4格式的openwrt文件系统|
 
-# 5. 调试与开发
+# 5. Openwrt的软件更新的方式：
+1. 将sd卡拔出，插入到linux系统，使用mount命令挂载文件系统，将需要的软件拷贝到sd卡上，然后重新启动系统。x代表具体的磁盘符号
+   ```
+   $ sudo mount /dev/sdX4 /mnt/
+   $ ls /mnt/
+	bin  dev  etc  lib  lib64  lost+found  mnt  overlay  proc  rom  root  sbin  sys  tmp  usr  var  www
+   ```
+2. 将软件编译到openwrt生成的压缩文件中，然后使用第4条的方法，进行整个磁盘的升级。
+
+# 6. 调试与开发
 
 串口线连接到开发板后，设置串口线的波特率的为115200n8
 
@@ -219,12 +228,5 @@ Usage:led-lightup [-hnv] [-n gpio-num 0-3][-v on-off 0/1]
 **led-lightup -n 3 -v 0** 熄灭编号为3的LED
 
 
-openwrt的软件更新的方式：
-1. 将sd卡拔出，插入到linux系统，使用mount命令挂载文件系统，将需要的软件拷贝到sd卡上，然后重新启动系统。x代表具体的磁盘符号
-   ```
-   $ sudo mount /dev/sdX4 /mnt/
-   $ ls /mnt/
-	bin  dev  etc  lib  lib64  lost+found  mnt  overlay  proc  rom  root  sbin  sys  tmp  usr  var  www
-   ```
-2. 将软件编译到openwrt生成的压缩文件中，然后使用第4条的方法，进行整个磁盘的升级。
+
 
