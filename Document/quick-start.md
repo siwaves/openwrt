@@ -161,7 +161,8 @@ $ ls /dev/sdb*
 |3|	linux的内核以及设备树|
 |4|	ext4格式的openwrt文件系统|
 
-# 5. Openwrt的软件更新的方式：
+# 5. Openwrt的软件更新的方式
+## 5.1 应用软件更新
 1. 将sd卡拔出，插入到linux系统，使用mount命令挂载文件系统，将需要的软件拷贝到sd卡上，然后重新启动系统。x代表具体的磁盘符号
    ```
    $ sudo mount /dev/sdX4 /mnt/
@@ -169,6 +170,18 @@ $ ls /dev/sdb*
 	bin  dev  etc  lib  lib64  lost+found  mnt  overlay  proc  rom  root  sbin  sys  tmp  usr  var  www
    ```
 2. 将软件编译到openwrt生成的压缩文件中，然后使用第4条的方法，进行整个磁盘的升级。
+
+## 5.2 linux内核更新
+1. 将sd卡拔出，插入到linux系统，使用mount命令挂载第三个分区，将需要linux内核siliconwaves-w3k-fpga-kernel.bin拷贝到sd卡上。x代表具体的磁盘符号:
+   ```
+   $ sudo mount /dev/sdX3 /mnt/
+   $ ls /mnt/
+      extlinux siliconwaves-w3k-fpga-kernel.bin siliconwaves-fpga.dtb
+   ```
+   其中siliconwaves-w3k-fpga-kernel.bin 为经过gz压缩的linux内核，
+    siliconwaves-fpga.dtb为linux内核的设备树文件。
+2. 在openwrt中，修改了内核代码build_dir/target-riscv64_w3k_musl/linux-siliconwaves_w3k/linux-5.10.168/，然后编译，会生成./build_dir/target-riscv64_w3k_musl/linux-siliconwaves_w3k/siliconwaves-w3k-fpga-kernel.bin。将此文件拷贝到步骤1挂载的/mnt下，即可以升级linux内核。
+
 
 # 6. 调试与开发
 
@@ -214,7 +227,7 @@ Platform IPI Device       : aclint-mswi
 上图为openwrt启动正常启动后的示意图。
 
 示例代码：
-[led-driver-demo](https://github.com/siwaves/openwrt/tree/openwrt-22.03-linux-5.10.168/package/siliconwaves/led-driver-demo)[led-user-demo](https://github.com/siwaves/openwrt/tree/openwrt-22.03-linux-5.10.168/package/siliconwaves/led-user-demo)是一对示例代码。
+[led-driver-demo](https://github.com/siwaves/openwrt/tree/openwrt-22.03-linux-5.10.168/package/siliconwaves/led-driver-demo)和[led-user-demo](https://github.com/siwaves/openwrt/tree/openwrt-22.03-linux-5.10.168/package/siliconwaves/led-user-demo)是一对示例代码。
 默认这两个程序是编译到openwrt中的。
 当openwrt启动后，可以执行led-lightup命令控制0-3编号的LED
 ```
@@ -226,7 +239,6 @@ Usage:led-lightup [-hnv] [-n gpio-num 0-3][-v on-off 0/1]
 **led-lightup -n 2 -v 1** 点亮编号为2的LED
 
 **led-lightup -n 3 -v 0** 熄灭编号为3的LED
-
 
 
 
