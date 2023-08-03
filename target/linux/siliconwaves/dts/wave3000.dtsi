@@ -100,7 +100,7 @@
 			reg-io-width = <4>;
 			reg-offset = <0x100>;
 			interrupts = <7>;
-			clock-frequency = <10000000>;
+			clock-frequency = <25000000>;
 			status = "disabled";
 		};
 		sdhci0: sdhci@3e101000 {
