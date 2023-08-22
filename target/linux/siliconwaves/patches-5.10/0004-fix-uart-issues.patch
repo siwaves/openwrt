@@ -1,0 +1,59 @@
+From 362153e25207fceb16172c7a24f8f250a5317346 Mon Sep 17 00:00:00 2001
+From: zehao zhang <zehao.zhang@siliconwaves.com>
+Date: Tue, 22 Aug 2023 12:28:27 +0800
+Subject: [PATCH] fix-uart-issues
+
+Signed-off-by: zehao zhang <zehao.zhang@siliconwaves.com>
+---
+ drivers/tty/serial/8250/8250_of.c   | 2 +-
+ drivers/tty/serial/8250/8250_port.c | 8 ++++++++
+ include/uapi/linux/serial_core.h    | 3 +++
+ 3 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/tty/serial/8250/8250_of.c b/drivers/tty/serial/8250/8250_of.c
+index 0b780e97a..98344f943 100644
+--- a/drivers/tty/serial/8250/8250_of.c
++++ b/drivers/tty/serial/8250/8250_of.c
+@@ -327,7 +327,7 @@ static const struct of_device_id of_platform_serial_table[] = {
+ 	{ .compatible = "mrvl,mmp-uart",
+ 		.data = (void *)PORT_XSCALE, },
+ 	{ .compatible = "siliconwaves,w3k-uart",
+-		.data = (void *)PORT_16550A, },
++		.data = (void *)PORT_W3K, },
+ 	{ .compatible = "ti,da830-uart", .data = (void *)PORT_DA830, },
+ 	{ .compatible = "nuvoton,npcm750-uart", .data = (void *)PORT_NPCM, },
+ 	{ /* end of list */ },
+diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_port.c
+index 1f231fcda..0a4dfc18b 100644
+--- a/drivers/tty/serial/8250/8250_port.c
++++ b/drivers/tty/serial/8250/8250_port.c
+@@ -307,6 +307,14 @@ static const struct serial8250_config uart_config[] = {
+ 		.rxtrig_bytes	= {1, 32, 64, 112},
+ 		.flags		= UART_CAP_FIFO | UART_CAP_SLEEP,
+ 	},
++	[PORT_W3K] = {
++		.name		= "SILICONWAVES W3K",
++		.fifo_size	= 16,
++		.tx_loadsz	= 16,
++		.fcr		= UART_FCR_ENABLE_FIFO | UART_FCR_R_TRIG_10,
++		.rxtrig_bytes	= {1, 4, 8, 14},
++		.flags		= UART_CAP_FIFO | UART_CAP_MINI,
++	},
+ };
+ 
+ /* Uart divisor latch read */
+diff --git a/include/uapi/linux/serial_core.h b/include/uapi/linux/serial_core.h
+index 851b982f8..fad398d99 100644
+--- a/include/uapi/linux/serial_core.h
++++ b/include/uapi/linux/serial_core.h
+@@ -279,4 +279,7 @@
+ /* Freescale LINFlexD UART */
+ #define PORT_LINFLEXUART	122
+ 
++/* Siliconwaves UART */
++#define PORT_W3K    123
++
+ #endif /* _UAPILINUX_SERIAL_CORE_H */
+-- 
+2.34.1
+
