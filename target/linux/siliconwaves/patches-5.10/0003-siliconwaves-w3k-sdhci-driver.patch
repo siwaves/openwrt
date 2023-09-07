@@ -3372,7 +3372,7 @@ index 000000000..35e755d73
 +	u16 ctrl;
 +	int ret;
 +	u32 pwr_cfg;
-+	void __iomem *base = ioremap(0xFFE54000, 0x1000);
++	//void __iomem *base = ioremap(0xFFE54000, 0x1000);
 +
 +	//pr_info(KERN_INFO "%s : %s()\n", mmc_hostname(mmc), __func__);
 +
@@ -3406,15 +3406,15 @@ index 000000000..35e755d73
 +		usleep_range(5000, 5500);
 +
 +		/* set IO Power Config */
-+		pwr_cfg = readl(base + 0xF00);
++		//pwr_cfg = readl(base + 0xF00);
 +
-+		if (host->slot_id == SLOT_EMMC) {
-+			pwr_cfg |= 0x3;
-+		} else if (host->slot_id == SLOT_SD) {
-+			pwr_cfg |= 0xC;
-+		}
++		//if (host->slot_id == SLOT_EMMC) {
++		//	pwr_cfg |= 0x3;
++		//} else if (host->slot_id == SLOT_SD) {
++		//	pwr_cfg |= 0xC;
++		//}
 +
-+		writel(pwr_cfg, base + 0xF00);
++		//writel(pwr_cfg, base + 0xF00);
 +
 +		/* 3.3V regulator output should be stable within 5 ms */
 +//		ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
@@ -3449,15 +3449,15 @@ index 000000000..35e755d73
 +		sdhci_w3k_voltage_switch(host);
 +
 +		/* set IO Power Config */
-+		pwr_cfg = readl(base + 0xF00);
++		//pwr_cfg = readl(base + 0xF00);
 +
-+		if (host->slot_id == SLOT_EMMC) {
-+			pwr_cfg &= ~0x3;
-+		} else if (host->slot_id == SLOT_SD) {
-+			pwr_cfg &= ~0xC;
-+		}
++		//if (host->slot_id == SLOT_EMMC) {
++		//	pwr_cfg &= ~0x3;
++		//} else if (host->slot_id == SLOT_SD) {
++		//	pwr_cfg &= ~0xC;
++		//}
 +
-+		writel(pwr_cfg, base + 0xF00);
++		//writel(pwr_cfg, base + 0xF00);
 +
 +		/* 1.8V regulator output should be stable within 5 ms */
 +//		ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
@@ -5903,16 +5903,16 @@ index 000000000..35e755d73
 +//	struct sdhci_w3k *sc;
 +	struct resource *res;
 +	int ret, irq/*, ptr, clks*/;
-+	void __iomem *base=NULL;
++	//void __iomem *base=NULL;
 +#ifdef USE_SRAM
 +	void __iomem *sram_addr = NULL;
 +#endif
-+	base = ioremap(0xF2208a00, 0x100);
-+	if (base) {
-+		writel( 0x4 , base+0x24);	
-+		writel( 0x4 , base+0x0C);	
-+		iounmap(base);
-+	}
++	//base = ioremap(0xF2208a00, 0x100);
++	//if (base) {
++	//	writel( 0x4 , base+0x24);	
++	//	writel( 0x4 , base+0x0C);	
++	//	iounmap(base);
++	//}
 +	
 +	//printk(KERN_INFO "w3k_sdhci_probe\n");
 +	if (!pdev->dev.platform_data && !pdev->dev.of_node) {
