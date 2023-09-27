@@ -114,50 +114,50 @@
 			cap-mmc-highspeed;
 			status = "disabled";
 		};
-		i2c0: i2c@10030000 {
-			compatible = "siliconwaves,w3k-i2c";
-			reg = <0x0 0x10030000 0x0 0x1000>;
-			interrupt-parent = <&plic0>;
-			interrupts = <52>;
-			reg-shift = <2>;
-			reg-io-width = <1>;
+
+		microblaze_1_axi_periph_xbar: axi {
 			#address-cells = <1>;
-			#size-cells = <0>;
-			status = "disabled";
-		};
-		qspi0: spi@10040000 {
-			compatible = "siliconwaves,w3k-qspi";
-			reg = <0x0 0x10040000 0x0 0x1000>,
-			      <0x0 0x20000000 0x0 0x10000000>;
-			interrupt-parent = <&plic0>;
-			interrupts = <41>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-			status = "disabled";
-		};
-		eth0: ethernet@10090000 {
-			compatible = "siliconwaves,eth";
-			interrupt-parent = <&plic0>;
-			interrupts = <55>;
-			reg = <0x0 0x10090000 0x0 0x2000>,
-			      <0x0 0x100a0000 0x0 0x1000>;
-			local-mac-address = [00 00 00 00 00 00];
-			#address-cells = <1>;
-			#size-cells = <0>;
-			status = "disabled";
-		};
-		gpio: gpio@10060000 {
-			compatible = "siliconwaves,gpio";
-			interrupt-parent = <&plic0>;
-			interrupts = <23>, <24>, <25>, <26>, <27>, <28>, <29>,
-				     <30>, <31>, <32>, <33>, <34>, <35>, <36>,
-				     <37>, <38>;
-			reg = <0x0 0x10060000 0x0 0x1000>;
-			gpio-controller;
-			#gpio-cells = <2>;
-			interrupt-controller;
-			#interrupt-cells = <2>;
-			status = "disabled";
+			#size-cells = <1>;
+			#interrupt-cells = <1>;
+			compatible = "xlnx,axi-crossbar-2.0", "simple-bus";
+			ranges;
+			axi_ethernet_1_axi_ethernet_buffer: axi-ethernet@307c0000 {
+				clock-frequency = <100000000>;
+				compatible = "xlnx,axi-ethernet-buffer-2.0", "xlnx,axi-ethernet-3.01.a", "xlnx,axi-ethernet-1.00.a";
+				device_type = "network";
+				interrupt-parent = <&plic0>;
+				interrupts = <15>;
+				local-mac-address = [ 00 0a 35 00 d9 4d ];
+				phy-handle = <&phy0>;
+				reg = < 0x307c0000 0x40000 0x30030000 0x10000 >;
+				xlnx,avb = <0x0>;
+				xlnx,halfdup = <0x0>;
+				xlnx,include-io = "1";
+				xlnx,mcast-extend = <0x0>;
+				xlnx,phy-type = <0x4>;
+				xlnx,phyaddr = <0x1>;
+				xlnx,rxcsum = <0x0>;
+				xlnx,rxmem = <0x1000>;
+				xlnx,rxvlan-strp = <0x0>;
+				xlnx,rxvlan-tag = <0x0>;
+				xlnx,rxvlan-tran = <0x0>;
+				xlnx,stats = <0x0>;
+				xlnx,txcsum = <0x0>;
+				xlnx,txmem = <0x1000>;
+				xlnx,txvlan-strp = <0x0>;
+				xlnx,txvlan-tag = <0x0>;
+				xlnx,txvlan-tran = <0x0>;
+				xlnx,type = <0x1>;
+				mdio {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					phy0: phy@0 {
+						compatible = "marvell,88E1111", "ethernet-phy-ieee802.3-c45";
+						device_type = "ethernet-phy";
+						reg = <2>;
+					};
+				};
+			};
 		};
 	};
 };

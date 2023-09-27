@@ -1,0 +1,325 @@
+From 8ddb8855ea337b44a86a2e37ba311a9167d5e4c0 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Wed, 27 Sep 2023 14:04:29 +0800
+Subject: [PATCH 2/3] siwaves: support ethnet and phy
+
+---
+ drivers/net/ethernet/xilinx/Makefile          |  4 +
+ .../net/ethernet/xilinx/xilinx_axienet_main.c | 61 ++++++++++++
+ .../net/ethernet/xilinx/xilinx_axienet_mdio.c | 96 +++++++++++++++++++
+ drivers/net/phy/Makefile                      |  3 +
+ drivers/net/phy/marvell10g.c                  | 14 +++
+ 5 files changed, 178 insertions(+)
+
+diff --git a/drivers/net/ethernet/xilinx/Makefile b/drivers/net/ethernet/xilinx/Makefile
+index 7d7dc1771..62e940eed 100644
+--- a/drivers/net/ethernet/xilinx/Makefile
++++ b/drivers/net/ethernet/xilinx/Makefile
+@@ -3,6 +3,10 @@
+ # Makefile for the Xilink network device drivers.
+ #
+ 
++ifeq ($(CONFIG_SOC_SILICONWAVES),y)
++	KBUILD_CFLAGS += -DSIWAVES_FLAGS
++endif
++
+ ll_temac-objs := ll_temac_main.o ll_temac_mdio.o
+ obj-$(CONFIG_XILINX_LL_TEMAC) += ll_temac.o
+ obj-$(CONFIG_XILINX_EMACLITE) += xilinx_emaclite.o
+diff --git a/drivers/net/ethernet/xilinx/xilinx_axienet_main.c b/drivers/net/ethernet/xilinx/xilinx_axienet_main.c
+index 2377fa268..9fd7eafd7 100644
+--- a/drivers/net/ethernet/xilinx/xilinx_axienet_main.c
++++ b/drivers/net/ethernet/xilinx/xilinx_axienet_main.c
+@@ -1066,6 +1066,48 @@ static irqreturn_t axienet_eth_irq(int irq, void *_ndev)
+ 	return IRQ_HANDLED;
+ }
+ 
++#ifdef SIWAVES_FLAGS
++static irqreturn_t axienet_irq(int irq, void *_ndev)
++{
++	struct net_device *ndev = _ndev;
++	struct axienet_local *lp = netdev_priv(ndev);
++	unsigned int pending;
++#ifdef SIWAVES_MULTI
++	int count = 10;
++	irqreturn_t value1;
++	irqreturn_t value2;
++#endif
++	//eth irq
++	pending = axienet_ior(lp, XAE_IP_OFFSET);
++	if(pending)
++		return axienet_eth_irq(irq, _ndev);
++
++#ifdef SIWAVES_MULTI
++	do{
++#endif
++		//tx irq
++		pending = axienet_dma_in32(lp, XAXIDMA_TX_SR_OFFSET);
++		if(pending & ((XAXIDMA_IRQ_IOC_MASK | XAXIDMA_IRQ_DELAY_MASK | XAXIDMA_IRQ_ALL_MASK)))
++#ifdef SIWAVES_MULTI
++			value1 = axienet_tx_irq(irq, _ndev);
++#else
++			return axienet_tx_irq(irq, _ndev);
++#endif
++
++		//rx irq
++		pending = axienet_dma_in32(lp, XAXIDMA_RX_SR_OFFSET);
++		if (pending & (XAXIDMA_IRQ_IOC_MASK | XAXIDMA_IRQ_DELAY_MASK | XAXIDMA_IRQ_ALL_MASK))
++#ifdef SIWAVES_MULTI
++			value2 = axienet_rx_irq(irq, _ndev);
++#else
++			return axienet_rx_irq(irq, _ndev);
++#endif
++#ifdef SIWAVES_MULTI
++	}while((count--) && (value1 == IRQ_HANDLED || value2 == IRQ_HANDLED));
++#endif
++	return IRQ_HANDLED;
++}
++#endif
+ static void axienet_dma_err_handler(struct work_struct *work);
+ 
+ /**
+@@ -1114,6 +1156,14 @@ static int axienet_open(struct net_device *ndev)
+ 	/* Enable worker thread for Axi DMA error handling */
+ 	INIT_WORK(&lp->dma_err_task, axienet_dma_err_handler);
+ 
++#ifdef SIWAVES_FLAGS
++	if (lp->eth_irq > 0) {
++		ret = request_irq(lp->eth_irq, axienet_irq, IRQF_SHARED,
++				  ndev->name, ndev);
++		if (ret)
++			goto err_eth_irq;
++	}
++#else
+ 	/* Enable interrupts for Axi DMA Tx */
+ 	ret = request_irq(lp->tx_irq, axienet_tx_irq, IRQF_SHARED,
+ 			  ndev->name, ndev);
+@@ -1132,13 +1182,16 @@ static int axienet_open(struct net_device *ndev)
+ 			goto err_eth_irq;
+ 	}
+ 
++#endif
+ 	return 0;
+ 
+ err_eth_irq:
++#ifndef SIWAVES_FLAGS
+ 	free_irq(lp->rx_irq, ndev);
+ err_rx_irq:
+ 	free_irq(lp->tx_irq, ndev);
+ err_tx_irq:
++#endif
+ 	phylink_stop(lp->phylink);
+ 	phylink_disconnect_phy(lp->phylink);
+ 	cancel_work_sync(&lp->dma_err_task);
+@@ -1204,8 +1257,10 @@ static int axienet_stop(struct net_device *ndev)
+ 
+ 	if (lp->eth_irq > 0)
+ 		free_irq(lp->eth_irq, ndev);
++#ifndef SIWAVES_FLAGS
+ 	free_irq(lp->tx_irq, ndev);
+ 	free_irq(lp->rx_irq, ndev);
++#endif
+ 
+ 	axienet_dma_bd_release(ndev);
+ 	return 0;
+@@ -1856,7 +1911,9 @@ static int axienet_probe(struct platform_device *pdev)
+ 
+ 	SET_NETDEV_DEV(ndev, &pdev->dev);
+ 	ndev->flags &= ~IFF_MULTICAST;  /* clear multicast */
++#ifndef SIWAVES_FLAGS
+ 	ndev->features = NETIF_F_SG;
++#endif
+ 	ndev->netdev_ops = &axienet_netdev_ops;
+ 	ndev->ethtool_ops = &axienet_ethtool_ops;
+ 
+@@ -1994,9 +2051,13 @@ static int axienet_probe(struct platform_device *pdev)
+ 		struct resource *res = platform_get_resource(pdev,
+ 							     IORESOURCE_MEM, 1);
+ 		lp->dma_regs = devm_ioremap_resource(&pdev->dev, res);
++#ifdef SIWAVES_FLAGS
++		lp->eth_irq = lp->rx_irq = lp->tx_irq = platform_get_irq(pdev, 0);
++#else
+ 		lp->rx_irq = platform_get_irq(pdev, 1);
+ 		lp->tx_irq = platform_get_irq(pdev, 0);
+ 		lp->eth_irq = platform_get_irq_optional(pdev, 2);
++#endif
+ 	}
+ 	if (IS_ERR(lp->dma_regs)) {
+ 		dev_err(&pdev->dev, "could not map DMA regs\n");
+diff --git a/drivers/net/ethernet/xilinx/xilinx_axienet_mdio.c b/drivers/net/ethernet/xilinx/xilinx_axienet_mdio.c
+index 435ed308d..847a46eb1 100644
+--- a/drivers/net/ethernet/xilinx/xilinx_axienet_mdio.c
++++ b/drivers/net/ethernet/xilinx/xilinx_axienet_mdio.c
+@@ -17,8 +17,16 @@
+ 
+ #include "xilinx_axienet.h"
+ 
++#ifdef SIWAVES_FLAGS
++#include <linux/mdio.h>
++#endif
++
+ #define MAX_MDIO_FREQ		2500000 /* 2.5 MHz */
++#ifdef SIWAVES_FLAGS
++#define DEFAULT_HOST_CLOCK	50000000 /* 50 MHz */
++#else
+ #define DEFAULT_HOST_CLOCK	150000000 /* 150 MHz */
++#endif
+ 
+ /* Wait till MDIO interface is ready to accept a new transaction.*/
+ static int axienet_mdio_wait_until_ready(struct axienet_local *lp)
+@@ -30,6 +38,69 @@ static int axienet_mdio_wait_until_ready(struct axienet_local *lp)
+ 				  1, 20000);
+ }
+ 
++#ifdef SIWAVES_FLAGS
++
++static int __axienet_mdio_write(struct mii_bus *bus, int phy_id, int reg,
++			      u16 val)
++{
++	int ret;
++	struct axienet_local *lp = bus->priv;
++
++	ret = axienet_mdio_wait_until_ready(lp);
++	if (ret < 0)
++		return ret;
++
++	axienet_iow(lp, XAE_MDIO_MWD_OFFSET, (u32) val);
++	axienet_iow(lp, XAE_MDIO_MCR_OFFSET,
++		    (((phy_id << XAE_MDIO_MCR_PHYAD_SHIFT) &
++		      XAE_MDIO_MCR_PHYAD_MASK) |
++		     ((reg << XAE_MDIO_MCR_REGAD_SHIFT) &
++		      XAE_MDIO_MCR_REGAD_MASK) |
++		     XAE_MDIO_MCR_INITIATE_MASK |
++		     XAE_MDIO_MCR_OP_WRITE_MASK));
++
++	return axienet_mdio_wait_until_ready(lp);
++}
++
++static int __axienet_mdio_read(struct mii_bus *bus, int phy_id, int reg)
++{
++	int ret;
++	struct axienet_local *lp = bus->priv;
++
++	ret = axienet_mdio_wait_until_ready(lp);
++	if (ret < 0)
++		return ret;
++
++	axienet_iow(lp, XAE_MDIO_MCR_OFFSET,
++		    (((phy_id << XAE_MDIO_MCR_PHYAD_SHIFT) &
++		      XAE_MDIO_MCR_PHYAD_MASK) |
++		     ((reg << XAE_MDIO_MCR_REGAD_SHIFT) &
++		      XAE_MDIO_MCR_REGAD_MASK) |
++		     XAE_MDIO_MCR_INITIATE_MASK |
++		     XAE_MDIO_MCR_OP_READ_MASK));
++
++	ret = axienet_mdio_wait_until_ready(lp);
++	if (ret < 0)
++		return ret;
++
++	return axienet_ior(lp, XAE_MDIO_MRD_OFFSET) & 0x0000FFFF;
++}
++
++static void mmd_phy_indirect(struct mii_bus *bus, int phy_addr, int devad,
++			     u16 regnum)
++{
++	/* Write the desired MMD Devad */
++	__axienet_mdio_write(bus, phy_addr, MII_MMD_CTRL, devad);
++
++	/* Write the desired MMD register address */
++	__axienet_mdio_write(bus, phy_addr, MII_MMD_DATA, regnum);
++
++	/* Select the Function : DATA with no post increment */
++	__axienet_mdio_write(bus, phy_addr, MII_MMD_CTRL,
++			devad | MII_MMD_CTRL_NOINCR);
++}
++#endif
++
+ /**
+  * axienet_mdio_read - MDIO interface read function
+  * @bus:	Pointer to mii bus structure
+@@ -48,6 +119,17 @@ static int axienet_mdio_read(struct mii_bus *bus, int phy_id, int reg)
+ 	int ret;
+ 	struct axienet_local *lp = bus->priv;
+ 
++#ifdef SIWAVES_FLAGS
++	u16 regnum;
++	int devad;
++
++	if(reg & MII_ADDR_C45){
++		regnum = reg & 0xffff;
++		devad  = (reg >> 16) & GENMASK(4, 0);
++		mmd_phy_indirect(bus, phy_id, devad, regnum);
++		return __axienet_mdio_read(bus, phy_id, MII_MMD_DATA);
++	}
++#endif
+ 	ret = axienet_mdio_wait_until_ready(lp);
+ 	if (ret < 0)
+ 		return ret;
+@@ -89,11 +171,25 @@ static int axienet_mdio_write(struct mii_bus *bus, int phy_id, int reg,
+ 			      u16 val)
+ {
+ 	int ret;
++#ifdef SIWAVES_FLAGS
++	u16 regnum;
++	int devad;
++#endif
+ 	struct axienet_local *lp = bus->priv;
+ 
+ 	dev_dbg(lp->dev, "axienet_mdio_write(phy_id=%i, reg=%x, val=%x)\n",
+ 		phy_id, reg, val);
+ 
++#ifdef SIWAVES_FLAGS
++	if(reg & MII_ADDR_C45){
++		regnum = reg & 0xffff;
++		devad  = (reg >> 16) & GENMASK(4, 0);
++
++		mmd_phy_indirect(bus, phy_id, devad, regnum);
++		return __axienet_mdio_write(bus, phy_id, MII_MMD_DATA, val);
++	}
++#endif
++
+ 	ret = axienet_mdio_wait_until_ready(lp);
+ 	if (ret < 0)
+ 		return ret;
+diff --git a/drivers/net/phy/Makefile b/drivers/net/phy/Makefile
+index fe8073bf3..dedbd3a50 100644
+--- a/drivers/net/phy/Makefile
++++ b/drivers/net/phy/Makefile
+@@ -74,6 +74,9 @@ obj-$(CONFIG_ICPLUS_PHY)	+= icplus.o
+ obj-$(CONFIG_INTEL_XWAY_PHY)	+= intel-xway.o
+ obj-$(CONFIG_LSI_ET1011C_PHY)	+= et1011c.o
+ obj-$(CONFIG_LXT_PHY)		+= lxt.o
++ifeq ($(CONFIG_SOC_SILICONWAVES),y)
++	KBUILD_CFLAGS += -DSIWAVES_FLAGS
++endif
+ obj-$(CONFIG_MARVELL_10G_PHY)	+= marvell10g.o
+ obj-$(CONFIG_MARVELL_PHY)	+= marvell.o
+ obj-$(CONFIG_MEDIATEK_GE_PHY)	+= mediatek-ge.o
+diff --git a/drivers/net/phy/marvell10g.c b/drivers/net/phy/marvell10g.c
+index 2b64318ef..271a2eb56 100644
+--- a/drivers/net/phy/marvell10g.c
++++ b/drivers/net/phy/marvell10g.c
+@@ -467,6 +467,20 @@ static int mv3310_config_init(struct phy_device *phydev)
+ 	    phydev->interface != PHY_INTERFACE_MODE_10GBASER)
+ 		return -ENODEV;
+ 
++#ifdef SIWAVES_FLAGS
++	val = phy_read_mmd(phydev, MDIO_MMD_PMAPMD,
++				   MDIO_STAT2_DEVPRST);
++	val |=0x1;
++	phy_write_mmd(phydev, MDIO_MMD_PMAPMD,
++				   MDIO_STAT2_DEVPRST, val);
++
++	phy_write_mmd(phydev, MDIO_MMD_VEND2,
++				   0xf020, 0x300); //LED0 blink on rx
++	phy_write_mmd(phydev, MDIO_MMD_VEND2,
++				   0xf021, 0x200); //LED1 blink on tx
++	phy_write_mmd(phydev, MDIO_MMD_VEND2,
++				   0xf023, 0); //turn off LED3
++#endif
+ 	phydev->mdix_ctrl = ETH_TP_MDI_AUTO;
+ 
+ 	/* Power up so reset works */
+-- 
+2.34.1
+

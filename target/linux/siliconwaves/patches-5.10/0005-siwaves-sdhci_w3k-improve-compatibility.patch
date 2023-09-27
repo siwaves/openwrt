@@ -1,0 +1,37 @@
+From 1eddb2c1f90ee58bc0b2864625eba390abd02f36 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Wed, 27 Sep 2023 14:02:10 +0800
+Subject: [PATCH 1/3] siwaves: sdhci_w3k: improve compatibility
+
+---
+ drivers/mmc/host/sdhci-w3k.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-w3k.c b/drivers/mmc/host/sdhci-w3k.c
+index ead146a98..57946ffc1 100644
+--- a/drivers/mmc/host/sdhci-w3k.c
++++ b/drivers/mmc/host/sdhci-w3k.c
+@@ -1752,7 +1752,6 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_command *cmd)
+ 				}
+ 				sdhci_writel(host,  host->sram, SDHCI_SDMA_SADDR_REG);
+ #else
+-				printk("dma address: 0x%llx, len: %u\n", sg_dma_address(data->sg), sg_dma_len(data->sg));
+ 				sdhci_writel(host, sg_dma_address(data->sg),
+ 					SDHCI_SDMA_SADDR_REG);
+ #endif
+@@ -5641,8 +5640,11 @@ int sdhci_add_host(struct sdhci_host *host)
+ 	/*
+ 	 * Maximum block count.
+ 	 */
++#ifdef W3K_SRAM_TO_MEM_FLAG
+ 	mmc->max_blk_count = (host->quirks & SDHCI_QUIRK_NO_MULTIBLOCK) ? 1 : (SRAM_SIZE/mmc->max_blk_size);
+-
++#else
++	mmc->max_blk_count = (host->quirks & SDHCI_QUIRK_NO_MULTIBLOCK) ? 1 : mmc->max_blk_size;
++#endif
+ 	/*
+ 	 * Init tasklets.
+ 	 */
+-- 
+2.34.1
+
