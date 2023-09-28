@@ -2,3 +2,4 @@ src-git-full packages git@github.com:siwaves/packages.git;for-cmcc
 src-git-full luci git@github.com:siwaves/luci.git;for-cmcc
 src-git-full routing git@github.com:siwaves/routing.git;for-cmcc
 src-git-full telephony git@github.com:siwaves/telephony.git;for-cmcc
+src-link esp ../espressif/feeds/esp

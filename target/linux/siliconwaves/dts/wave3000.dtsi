@@ -9,6 +9,7 @@
 
 	aliases {
 		serial0 = &uart0;
+		serial1 = &uart1;
 	};
 
 	chosen {
@@ -98,7 +99,7 @@
 			interrupt-parent = <&plic0>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
-			reg-offset = <0x100>;
+			reg-offset = <0x200>;
 			interrupts = <7>;
 			baud = <115200>;
 			clock-frequency = <25000000>;
@@ -111,6 +112,18 @@
 			reg-shift = <2>;
 			reg-io-width = <4>;
 			reg-offset = <0x0>;
+			interrupts = <7>;
+			baud = <115200>;
+			clock-frequency = <25000000>;
+			status = "disabled";
+		};
+		uart1: serial@3e103100 {
+			compatible = "siliconwaves,w3k-uart";
+			reg = <0x0 0x3e103000 0x0 0x1000>;
+			interrupt-parent = <&plic0>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			reg-offset = <0x200>;
 			interrupts = <7>;
 			baud = <115200>;
 			clock-frequency = <25000000>;
@@ -172,6 +185,25 @@
 				};
 			};
 		};
+		spi0: spi@3e200100 {
+		  compatible = "xlnx,xps-spi-2.00.a";
+		  interrupt-parent = <&plic0>;
+		  interrupts = <20>;
+		  reg = <0x3e200100 0x100>;
+		  xlnx,num-ss-bits = <0x1>;
+		  xlnx,num-transfer-bits = <32>;
+		  status = "disabled";
+		};
+		gpio: gpio@0x3e204000 {
+		  compatible = "xlnx,xps-gpio-1.00.a";
+		  interrupt-parent = <&plic0>;
+		  interrupts = <8>;
+		  reg = <0x0 0x3e204000 0x0 0x1000>;
+		  gpio-controller;
+		  #gpio-cells = <2>;
+		  interrupt-controller;
+		  #interrupt-cells = <2>;
+		  status = "disabled";
+		};
 	};
 };
-
