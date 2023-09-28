@@ -1,0 +1,24 @@
+From 2739a150a61da5aa3f367c4c7d580cf35ad4577c Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Thu, 28 Sep 2023 21:27:17 +0800
+Subject: [PATCH] siwaves: add w3k early console
+
+---
+ drivers/tty/serial/8250/8250_early.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/tty/serial/8250/8250_early.c b/drivers/tty/serial/8250/8250_early.c
+index 70d782678..db989f3de 100644
+--- a/drivers/tty/serial/8250/8250_early.c
++++ b/drivers/tty/serial/8250/8250_early.c
+@@ -178,6 +178,7 @@ EARLYCON_DECLARE(uart8250, early_serial8250_setup);
+ EARLYCON_DECLARE(uart, early_serial8250_setup);
+ OF_EARLYCON_DECLARE(ns16550, "ns16550", early_serial8250_setup);
+ OF_EARLYCON_DECLARE(ns16550a, "ns16550a", early_serial8250_setup);
++OF_EARLYCON_DECLARE(ns16550a, "siliconwaves,w3k-uart", early_serial8250_setup);
+ OF_EARLYCON_DECLARE(uart, "nvidia,tegra20-uart", early_serial8250_setup);
+ OF_EARLYCON_DECLARE(uart, "snps,dw-apb-uart", early_serial8250_setup);
+ 
+-- 
+2.34.1
+
