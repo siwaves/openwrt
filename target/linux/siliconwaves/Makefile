@@ -23,6 +23,6 @@ endef
 
 KERNELNAME:= Image dtbs
 include $(INCLUDE_DIR)/target.mk
-DEFAULT_PACKAGES += e2fsprogs perf ethtool-full minicom
+DEFAULT_PACKAGES += e2fsprogs perf ethtool-full minicom default-settings-siliconwaves
 
 $(eval $(call BuildTarget))

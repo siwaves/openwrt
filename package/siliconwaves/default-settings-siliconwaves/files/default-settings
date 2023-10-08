@@ -1,0 +1,4 @@
+#!/bin/sh
+
+sed -i 's/root:::0:99999:7:::/root:$1$e7p6TTJ0$q7QuQjGxXa78x1Sk\/Qdt61:19628:0:99999:7:::/g' /etc/shadow
+
