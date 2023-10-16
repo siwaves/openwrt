@@ -1,0 +1,436 @@
+From c4bf425f8371100b4dcef32589d1101c2cbf3dd9 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Mon, 16 Oct 2023 10:54:16 +0800
+Subject: [PATCH 2/2] siliconwaves: w3k: add spi driver
+
+---
+ drivers/spi/Kconfig   |   6 +
+ drivers/spi/Makefile  |   1 +
+ drivers/spi/spi-w3k.c | 373 ++++++++++++++++++++++++++++++++++++++++++
+ drivers/spi/spidev.c  |   1 +
+ 4 files changed, 381 insertions(+)
+ create mode 100644 drivers/spi/spi-w3k.c
+
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index aadaea052..7faeda5c5 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -967,6 +967,12 @@ config SPI_AMD
+ 	help
+ 	  Enables SPI controller driver for AMD SoC.
+ 
++config SPI_W3K
++	tristate "W3K SPI controller"
++	depends on SPI_MASTER && SOC_SILICONWAVES
++	help
++	  This option enables support for Siliconwaves w3k SPI Controller.
++
+ #
+ # Add new SPI master controllers in alphabetical order above this line
+ #
+diff --git a/drivers/spi/Makefile b/drivers/spi/Makefile
+index 6fea58216..b6c31866d 100644
+--- a/drivers/spi/Makefile
++++ b/drivers/spi/Makefile
+@@ -131,6 +131,7 @@ obj-$(CONFIG_SPI_XTENSA_XTFPGA)		+= spi-xtensa-xtfpga.o
+ obj-$(CONFIG_SPI_ZYNQ_QSPI)		+= spi-zynq-qspi.o
+ obj-$(CONFIG_SPI_ZYNQMP_GQSPI)		+= spi-zynqmp-gqspi.o
+ obj-$(CONFIG_SPI_AMD)			+= spi-amd.o
++obj-$(CONFIG_SPI_W3K)			+= spi-w3k.o
+ 
+ # SPI slave protocol handlers
+ obj-$(CONFIG_SPI_SLAVE_TIME)		+= spi-slave-time.o
+diff --git a/drivers/spi/spi-w3k.c b/drivers/spi/spi-w3k.c
+new file mode 100644
+index 000000000..b5ca7a83e
+--- /dev/null
++++ b/drivers/spi/spi-w3k.c
+@@ -0,0 +1,373 @@
++/*
++ * Driver for Siliconwaves W3K SPI Controllers
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++#include <asm/page.h>
++#include <linux/clk.h>
++#include <linux/completion.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/of_device.h>
++#include <linux/of_gpio.h>
++#include <linux/of_irq.h>
++#include <linux/spi/spi.h>
++
++/* SPI register offsets */
++#define SPI_CFG_REG 			0x00
++#define SPI_CFG_DIV_MASK		(0xff<< 0)
++#define SPI_CFG_CPOL			(0x1 << 8)
++#define SPI_CFG_CPHA			(0x1 << 9)
++
++#define SPI_TRNS_REG			0x04
++
++#define SPI_CTL_REG			0x40
++#define SPI_CTL_FLUSH			(0x1 <<  0)
++#define SPI_CTL_BUSY			(0x1 << 31)
++
++#define SPI_WDTSEL_REG			0x14
++#define SPI_WDTSEL_WIDTH		(0x1f << 0)
++
++#define SPI_FFCTL_REG			0x18
++#define SPI_FFCTL_TX_THRES		(0x7 <<  0)
++#define SPI_FFCTL_EN_TX_EMPTY_ITR	(0x1 <<  4)
++#define SPI_FFCTL_EN_TX_UNDER_ITR	(0x1 <<  5)
++#define SPI_FFCTL_RX_THRES		(0x7 <<  8)
++#define SPI_FFCTL_EN_RX_FULL_ITR	(0x1 << 12)
++#define SPI_FFCTL_EN_RX_OVER_ITR	(0x1 << 13)
++#define SPI_FFCTL_FIFO_FLUSH		(0x1 << 31)
++
++#define SPI_FFSTA_REG			0x1C
++#define SPI_FFSTA_TX_COUNT		(0xf <<  0)
++#define SPI_FFSTA_RX_COUNT		(0xf <<  8)
++#define SPI_FFSTA_RX_SHIFT		(8)
++
++#define SPI_PAS_REG			0x20
++#define SPI_PAS_TX_PAUSE		(0x1 <<  0)
++#define SPI_PAS_TX_RESUME		(0x0 <<  0)
++
++
++#define SPI_WDT_REG			0x28
++#define SPI_RDT_REG			0x2C
++#define SPI_RDFF_REG			0x30
++#define SPI_FIFO_FULL 			(0x8)
++
++#define W3K_SPI_POLLING_LIMIT_US	30
++#define W3K_SPI_POLLING_JIFFIES	2
++#define W3K_SPI_DMA_MIN_LENGTH	96
++#define W3K_SPI_MODE_BITS	(SPI_MODE_2)
++#define W3K_CLOCK_HZ 12000000
++#define DRV_NAME	"spi-w3k"
++#define W3K_SPI_TIMEOUT_MS  30000
++
++struct w3k_spi {
++	void __iomem *regs;
++	struct clk *clk;
++	int irq;
++    struct completion done;
++	const u8 *tx_buf;
++	u8 *rx_buf;
++	int tx_len;
++	int rx_len;
++};
++
++static inline u32 w3k_spi_read(struct w3k_spi *bs, unsigned reg)
++{
++	return readl(bs->regs + reg);
++}
++
++static inline void w3k_spi_write(struct w3k_spi *bs, unsigned reg, u32 val)
++{
++	writel(val, bs->regs + reg);
++}
++
++static inline void w3k_spi_read_fifo(struct w3k_spi *bs)
++{
++	u8 byte;
++	rmb();
++	while ((bs->rx_len) &&
++	       (w3k_spi_read(bs, SPI_FFSTA_REG ) & SPI_FFSTA_RX_COUNT)) {
++		byte = w3k_spi_read(bs, SPI_RDFF_REG);
++		if (bs->rx_buf)
++			*bs->rx_buf++ = byte;
++		bs->rx_len--;
++	}
++}
++
++static inline void w3k_spi_write_fifo(struct w3k_spi *bs)
++{
++	u8 byte;
++	int now_used;
++
++	int used = (w3k_spi_read(bs, SPI_FFSTA_REG) & SPI_FFSTA_TX_COUNT );
++	int remaining = SPI_FIFO_FULL - used;
++	while(bs->tx_len > 0 && remaining > 0){
++		byte = bs->tx_buf ? *bs->tx_buf++ : 0;
++		w3k_spi_write(bs, SPI_RDT_REG , byte);
++		bs->tx_len--;
++		remaining--;
++		used++;
++	}
++	wmb();
++
++	now_used = w3k_spi_read(bs, SPI_FFSTA_REG) & SPI_FFSTA_TX_COUNT;
++	while( now_used != used){
++		printk("%s %d, bug\n", __func__, __LINE__);
++		now_used = w3k_spi_read(bs, SPI_FFSTA_REG) & SPI_FFSTA_TX_COUNT;
++	}
++}
++
++static irqreturn_t w3k_spi_interrupt(int irq, void *dev_id)
++{
++	struct spi_master *master = dev_id;
++	struct w3k_spi *bs = spi_master_get_devdata(master);
++	u8 tx_fifo, rx_fifo;
++	u32 status;
++	tx_fifo = w3k_spi_read(bs, SPI_FFSTA_REG) & SPI_FFSTA_TX_COUNT;
++	rx_fifo = w3k_spi_read(bs, SPI_FFSTA_REG) & SPI_FFSTA_RX_COUNT;
++	rx_fifo >>= SPI_FFSTA_RX_SHIFT;
++	//printk(KERN_INFO "w3k_spi_interrupt");
++	if (bs->tx_len && (tx_fifo ==0)) {
++		/* pause for reading data */
++		w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_PAUSE);
++		/* Read 8 bytes of data */
++		w3k_spi_read_fifo(bs);
++
++		/* Write up to 8 bytes */
++		w3k_spi_write_fifo(bs);
++
++		/* unpause */
++		w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_RESUME);
++
++		return IRQ_HANDLED;
++	} else {
++		// done
++		status = w3k_spi_read(bs, SPI_FFCTL_REG);
++		status &= ~SPI_FFCTL_EN_TX_EMPTY_ITR;
++		w3k_spi_write(bs, SPI_FFCTL_REG, status);
++	}
++
++	complete(&bs->done);
++	return IRQ_HANDLED;
++}
++
++static int w3k_spi_start_transfer(struct spi_device *spi,
++				      struct spi_transfer *tfr)
++{
++	struct w3k_spi *bs = spi_master_get_devdata(spi->master);
++	unsigned long spi_hz, clk_hz, cdiv;
++	u32 cfg=0;
++	u32 status;
++
++    /* set clock */
++    spi_hz = tfr->speed_hz;
++    clk_hz = W3K_CLOCK_HZ;
++    /* if spi : 50M, clk_hz : 50M, max: 25M */
++	if (spi_hz >= clk_hz / 2) {
++		cdiv = 2; /* clk_hz/2 is the fastest we can go */
++	} else if (spi_hz) {
++		cdiv = (int)((clk_hz >>1)/ spi_hz );
++		if (cdiv)
++				cdiv--;
++		/* CDIV must be a multiple of two */
++		if (cdiv >= 256)
++				cdiv = 256; /* 0 is the slowest we can go */
++	}
++	cfg = (cdiv & SPI_CFG_DIV_MASK);
++
++	if (spi->mode & SPI_CPOL)
++		cfg |= SPI_CFG_CPOL;
++	if (spi->mode & SPI_CPHA)
++		cfg |= SPI_CFG_CPHA;
++
++     w3k_spi_write(bs, SPI_CFG_REG, cfg);
++
++	reinit_completion(&bs->done);
++	bs->tx_buf = tfr->tx_buf;
++	bs->rx_buf = tfr->rx_buf;
++	bs->tx_len = tfr->len;
++	bs->rx_len = tfr->len;
++
++	w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_PAUSE);
++	w3k_spi_write_fifo(bs);
++	w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_RESUME);
++	/* enable tx fifo empty interrup */
++	status = w3k_spi_read(bs, SPI_FFCTL_REG);
++	status |= SPI_FFCTL_EN_TX_EMPTY_ITR;
++	w3k_spi_write(bs, SPI_FFCTL_REG, status);
++	return 0;
++}
++
++static int w3k_spi_finish_transfer(struct spi_device *spi,
++				struct spi_transfer *tfr)
++{
++	struct w3k_spi *bs = spi_master_get_devdata(spi->master);
++	u32 status;
++
++	/* Drain RX FIFO */
++	while (w3k_spi_read(bs, SPI_FFSTA_REG) & SPI_FFSTA_RX_COUNT) {
++		w3k_spi_read_fifo(bs);
++	}
++
++	if (tfr->delay_usecs)
++		udelay(tfr->delay_usecs);
++	/* clear tx fifo empty interrupt */
++	status = w3k_spi_read(bs, SPI_FFCTL_REG);
++	status &= ~SPI_FFCTL_EN_TX_EMPTY_ITR;
++	w3k_spi_write(bs, SPI_FFCTL_REG, status);
++
++	return 0;
++}
++
++static int w3k_spi_transfer_one(struct spi_master *master,
++				    struct spi_message *mesg)
++{
++	struct w3k_spi *bs = spi_master_get_devdata(master);
++	struct spi_transfer *tfr;
++	struct spi_device *spi = mesg->spi;
++	int err = 0;
++	unsigned int timeout;
++	int trsnum =0;
++
++
++	list_for_each_entry(tfr, &mesg->transfers, transfer_list) {
++		trsnum += tfr->len;
++	}
++	/* Set the number of bytes to transfer and keep CS active */
++	w3k_spi_write(bs, SPI_TRNS_REG, trsnum );
++	list_for_each_entry(tfr, &mesg->transfers, transfer_list) {
++		err = w3k_spi_start_transfer(spi, tfr);
++		if (err)
++			goto out;
++
++		timeout = wait_for_completion_timeout(
++			&bs->done,
++			msecs_to_jiffies(W3K_SPI_TIMEOUT_MS)
++			);
++		if (!timeout) {
++			err = -ETIMEDOUT;
++			goto out;
++		}
++
++		err = w3k_spi_finish_transfer(spi, tfr);
++		if (err)
++			goto out;
++
++		mesg->actual_length += tfr->len;
++	}
++
++out:
++	mesg->status = err;
++	spi_finalize_current_message(master);
++
++	return 0;
++}
++
++static int w3k_spi_probe(struct platform_device *pdev)
++{
++	struct spi_master *master;
++	struct w3k_spi *bs;
++	struct resource *res;
++	int err;
++
++	master = spi_alloc_master(&pdev->dev, sizeof(*bs));
++	if (!master) {
++		dev_err(&pdev->dev, "spi_alloc_master() failed\n");
++		return -ENOMEM;
++	}
++
++	platform_set_drvdata(pdev, master);
++
++	master->mode_bits = W3K_SPI_MODE_BITS;
++	master->bits_per_word_mask = SPI_BPW_MASK(8);
++	master->num_chipselect = 1;
++	master->transfer_one_message = w3k_spi_transfer_one;
++	master->dev.of_node = pdev->dev.of_node;
++
++	bs = spi_master_get_devdata(master);
++
++	init_completion(&bs->done);
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	bs->regs = devm_ioremap_resource(&pdev->dev, res);
++	if (IS_ERR(bs->regs)) {
++		err = PTR_ERR(bs->regs);
++		goto out_master_put;
++	}
++
++	bs->irq = platform_get_irq(pdev, 0);
++	if (bs->irq <= 0) {
++		dev_err(&pdev->dev, "could not get IRQ: %d\n", bs->irq);
++		err = bs->irq ? bs->irq : -ENODEV;
++		goto out_master_put;
++	}
++
++	/* initlialize 8 bit transfer */
++	w3k_spi_write(bs, SPI_WDTSEL_REG, 0x7);
++
++	err = devm_request_irq(&pdev->dev, bs->irq, w3k_spi_interrupt, 0,
++			       dev_name(&pdev->dev), master);
++	if (err) {
++		dev_err(&pdev->dev, "could not request IRQ: %d\n", err);
++		goto out_master_put;
++	}
++
++	err = devm_spi_register_master(&pdev->dev, master);
++	if (err) {
++		dev_err(&pdev->dev, "could not register SPI master: %d\n", err);
++		goto out_master_put;
++	}
++
++	printk(KERN_INFO "w3k SoC SPI driver initialized\n");
++
++	return 0;
++
++out_master_put:
++	spi_master_put(master);
++	return err;
++}
++
++static int w3k_spi_remove(struct platform_device *pdev)
++{
++	struct spi_master *master = platform_get_drvdata(pdev);
++	struct w3k_spi *bs = spi_master_get_devdata(master);
++
++	w3k_spi_write(bs, SPI_FFCTL_REG, SPI_FFCTL_FIFO_FLUSH);
++
++	return 0;
++}
++
++static const struct of_device_id w3k_spi_match[] = {
++	{ .compatible = "siliconwaves,w3k-spi", },
++	{}
++};
++MODULE_DEVICE_TABLE(of, w3k_spi_match);
++
++static struct platform_driver w3k_spi_driver = {
++	.driver		= {
++		.name		= DRV_NAME,
++		.of_match_table	= w3k_spi_match,
++	},
++	.probe		= w3k_spi_probe,
++	.remove		= w3k_spi_remove,
++};
++module_platform_driver(w3k_spi_driver);
++
++MODULE_DESCRIPTION("SPI controller driver for Siliconwaves w3k SoC");
++MODULE_AUTHOR("Richard Dai");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/spi/spidev.c b/drivers/spi/spidev.c
+index 2e757c6ac..3df2695f6 100644
+--- a/drivers/spi/spidev.c
++++ b/drivers/spi/spidev.c
+@@ -692,6 +692,7 @@ static const struct of_device_id spidev_dt_ids[] = {
+ 	{ .compatible = "dh,dhcom-board" },
+ 	{ .compatible = "menlo,m53cpld" },
+ 	{ .compatible = "siliconlabs,si3210" },
++	{ .compatible = "siliconwaves,w3k-spidev" },
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(of, spidev_dt_ids);
+-- 
+2.34.1
+

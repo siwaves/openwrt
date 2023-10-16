@@ -1,0 +1,606 @@
+From 3e4a042c88af5b906d4c358ac174a0f55f3601b5 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Mon, 16 Oct 2023 10:51:18 +0800
+Subject: [PATCH 1/2] siliconwaves: w3k: add gpio controller driver
+
+---
+ arch/riscv/Kconfig.socs           |   1 +
+ arch/riscv/include/asm/w3k-gpio.h |  23 ++
+ drivers/gpio/Kconfig              |   8 +
+ drivers/gpio/Makefile             |   1 +
+ drivers/gpio/gpio-w3k.c           | 512 ++++++++++++++++++++++++++++++
+ 5 files changed, 545 insertions(+)
+ create mode 100644 arch/riscv/include/asm/w3k-gpio.h
+ create mode 100644 drivers/gpio/gpio-w3k.c
+
+diff --git a/arch/riscv/Kconfig.socs b/arch/riscv/Kconfig.socs
+index b7563a9f4..d726f5a17 100644
+--- a/arch/riscv/Kconfig.socs
++++ b/arch/riscv/Kconfig.socs
+@@ -52,6 +52,7 @@ config SOC_SILICONWAVES
+ 	bool "Siliconwaves SoCs"
+ 	select SILICONWAVES_PLIC
+ 	select SILICONWAVES_L2_CACHE
++	select GPIOLIB
+ 	help
+ 	  This enables support for Siliconwaves SoC platform hardware.
+ 
+diff --git a/arch/riscv/include/asm/w3k-gpio.h b/arch/riscv/include/asm/w3k-gpio.h
+new file mode 100644
+index 000000000..d3e1c4dc8
+--- /dev/null
++++ b/arch/riscv/include/asm/w3k-gpio.h
+@@ -0,0 +1,23 @@
++#ifndef _ARCH_W3K_GPIO_H
++#define _ARCH_W3K_GPIO_H
++
++#define ARCH_NR_GPIOS 32
++
++/* Note: this may rely upon the value of ARCH_NR_GPIOS set in mach/gpio.h */
++#include <asm-generic/gpio.h>
++#if 1
++/* The trivial gpiolib dispatchers */
++#define gpio_get_value  __gpio_get_value
++#define gpio_set_value  __gpio_set_value
++#define gpio_cansleep   __gpio_cansleep
++
++/*
++ * Provide a default gpio_to_irq() which should satisfy every case.
++ * However, some platforms want to do this differently, so allow them
++ * to override it.
++ */
++#ifndef gpio_to_irq
++#define gpio_to_irq	__gpio_to_irq
++#endif
++#endif
++#endif /* _ARCH_ARM_GPIO_H */
+\ No newline at end of file
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index 7f57bb8aa..fdcd18eb6 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -739,6 +739,14 @@ config GPIO_AMD_FCH
+ 	  Note: This driver doesn't registers itself automatically, as it
+ 	  needs to be provided with platform specific configuration.
+ 	  (See eg. CONFIG_PCENGINES_APU2.)
++
++config GPIO_W3K
++	tristate "Siliconwaves W3K GPIO support"
++	depends on SOC_SILICONWAVES
++	select GPIOLIB_IRQCHIP
++	help
++	  Say yes here to support W3K GPIO controller.
++
+ endmenu
+ 
+ menu "Port-mapped I/O GPIO drivers"
+diff --git a/drivers/gpio/Makefile b/drivers/gpio/Makefile
+index 411f285ab..93050fb61 100644
+--- a/drivers/gpio/Makefile
++++ b/drivers/gpio/Makefile
+@@ -181,3 +181,4 @@ obj-$(CONFIG_GPIO_XTENSA)		+= gpio-xtensa.o
+ obj-$(CONFIG_GPIO_ZEVIO)		+= gpio-zevio.o
+ obj-$(CONFIG_GPIO_ZX)			+= gpio-zx.o
+ obj-$(CONFIG_GPIO_ZYNQ)			+= gpio-zynq.o
++obj-$(CONFIG_GPIO_W3K)			+= gpio-w3k.o
+diff --git a/drivers/gpio/gpio-w3k.c b/drivers/gpio/gpio-w3k.c
+new file mode 100644
+index 000000000..8522f32ed
+--- /dev/null
++++ b/drivers/gpio/gpio-w3k.c
+@@ -0,0 +1,512 @@
++/*
++ * w3k GPIO  device driver
++ *
++ *
++ * This program is free software; you can redistribute it and/or modify it under
++ * the terms of the GNU General Public License as published by the Free Software
++ * Foundation; either version 2 of the License, or (at your option) any later
++ * version.
++ */
++
++#include <linux/bitops.h>
++#include <linux/gpio/driver.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/of.h>
++#include <asm/w3k-gpio.h>
++
++#define DRIVER_NAME "w3k-gpio"
++
++#define GPIO_OEN_REG			(0x80)
++#define GPIO_REN_REG			(0x84)
++#define GPIO_OUT_REG			(0x88)
++#define GPIO_IN_REG			(0x8C)
++
++#define GPIO_ITR_CFG0_REG		(0x90)
++#define GPIO_ITR_CFG1_REG		(0x94)
++#define GPIO_ITR_CFG2_REG		(0x98)
++#define GPIO_ITR_CFG3_REG		(0x9C)
++#define GPIO_EINT_REG			(0xA0)
++#define GPIO_ITR_FLAG_REG		(0xA4)
++
++#define W3K_GPIO_IN			(0x1)
++#define W3K_GPIO_OUT		(0x0)
++#define W3K_GPIO_INT_DE		(0x0)
++#define W3K_GPIO_INT_EN		(0x1)
++#define W3K_GPIO_INT_RISING		(0x0)
++#define W3K_GPIO_INT_FALLING	(0x1)
++#define W3K_GPIO_INT_HIGH		(0x2)
++#define W3K_GPIO_INT_LOW		(0x3)
++#define W3K_GPIO_INT_RISING_FALLING (0x4)
++
++#define	W3K_GPIO_NR_GPIOS	32
++
++/**
++ * struct w3k_gpio - gpio device private data structure
++ * @chip:	instance of the gpio_chip
++ * @base_addr:	base address of the GPIO device
++ * @irq:	interrupt for the GPIO device
++ * @p_data:	pointer to platform data
++ */
++struct w3k_gpio {
++	struct gpio_chip chip;
++	void __iomem *base_addr;
++#ifdef W3K_PINMUX
++	void __iomem *pinmux_addr;
++#endif
++	int irq;
++	const struct w3k_platform_data *p_data;
++};
++
++/**
++ * struct w3k_platform_data -  w3k gpio platform data structure
++ * @label:	string to store in gpio->label
++ * @ngpio:	max number of gpio pins
++*/
++struct w3k_platform_data {
++	const char *label;
++	u16 ngpio;
++};
++
++static struct irq_chip w3k_gpio_irqchip;
++
++static void __gpio_line_config(struct w3k_gpio *gpio, unsigned int pin, int direction)
++{
++	unsigned int state;
++	direction = !!direction;
++	switch (direction)
++	{
++	case W3K_GPIO_IN:
++		writel_relaxed(1<<2, gpio->base_addr + 4*pin);
++		break;
++	case W3K_GPIO_OUT:
++		state = readl_relaxed(gpio->base_addr + GPIO_OEN_REG);
++		writel_relaxed(state | (1<< pin), gpio->base_addr + GPIO_OEN_REG);
++		writel_relaxed(0, gpio->base_addr + 4*pin);
++		break;
++	}
++}
++
++static void __gpio_line_set_interrupt_enable(struct w3k_gpio *gpio, unsigned int pin, int value)
++{
++	unsigned int state = readl_relaxed(gpio->base_addr + GPIO_EINT_REG);
++
++	value = !!value;
++	state &= ~(0x1 << pin);
++	state |= (value << pin);
++	writel_relaxed(state, gpio->base_addr + GPIO_EINT_REG);
++}
++
++static void __gpio_line_set_trigger(struct w3k_gpio *gpio, int pin, int state)
++{
++	int offset=0;
++	uint32_t reg_addr=0;
++	uint32_t trig;
++
++	/* set trigger value from CFG0~CFG3 registers */
++	/* each config takes 4 bits of register       */
++	offset = (pin % 8);
++	offset <<= 2;
++	reg_addr = (uint32_t)GPIO_ITR_CFG0_REG + ((pin / 8) << 2);
++
++	trig = readl_relaxed((void __iomem *)gpio->base_addr + reg_addr);
++	trig &= ~(0x7 << offset);
++	trig |= (state << offset);
++	writel_relaxed(trig ,(void __iomem *) gpio->base_addr + reg_addr);
++}
++
++
++/**
++ * w3k_gpio_get_value - Get the state of the specified pin of GPIO device
++ * @chip:	gpio_chip instance to be worked on
++ * @pin:	gpio pin number within the device
++ *
++ * This function reads the state of the specified pin of the GPIO device.
++ *
++ * Return: 0 if the pin is low, 1 if pin is high.
++ */
++static int w3k_gpio_get_value(struct gpio_chip *chip, unsigned int pin)
++{
++	u32 data;
++	struct w3k_gpio *gpio = gpiochip_get_data(chip);
++
++	data = readl_relaxed(gpio->base_addr + GPIO_IN_REG );
++
++	return (data >> pin) & 1;
++}
++
++/**
++ * w3k_gpio_set_value - Modify the state of the pin with specified value
++ * @chip:	gpio_chip instance to be worked on
++ * @pin:	gpio pin number within the device
++ * @state:	value used to modify the state of the specified pin
++ *
++ */
++static void w3k_gpio_set_value(struct gpio_chip *chip, unsigned int pin,
++				int state)
++{
++	u32 data;
++	struct w3k_gpio *gpio = gpiochip_get_data(chip);
++
++	data = readl_relaxed(gpio->base_addr + GPIO_OUT_REG);
++
++	state = !!state;
++
++	data &= ~( 0x1 << pin);
++	data |= state << pin;
++
++	writel_relaxed(data, gpio->base_addr + GPIO_OUT_REG);
++}
++
++/**
++ * w3k_gpio_dir_in - Set the direction of the specified GPIO pin as input
++ * @chip:	gpio_chip instance to be worked on
++ * @pin:	gpio pin number within the device
++ *
++ * This function uses the read-modify-write sequence to set the direction of
++ * the gpio pin as input.
++ *
++ * Return: 0 always
++ */
++static int w3k_gpio_dir_in(struct gpio_chip *chip, unsigned int pin)
++{
++	struct w3k_gpio *gpio = gpiochip_get_data(chip);
++	__gpio_line_config(gpio , pin, W3K_GPIO_IN);
++	return 0;
++}
++
++/**
++ * w3k_gpio_dir_out - Set the direction of the specified GPIO pin as output
++ * @chip:	gpio_chip instance to be worked on
++ * @pin:	gpio pin number within the device
++ * @state:	value to be written to specified pin
++ *
++ * This function sets the direction of specified GPIO pin as output, configures
++ * the Output Enable register for the pin and uses w3k_gpio_set to set
++ * the state of the pin to the value specified.
++ *
++ * Return: 0 always
++ */
++static int w3k_gpio_dir_out(struct gpio_chip *chip, unsigned int pin,
++			     int state)
++{
++	struct w3k_gpio *gpio = gpiochip_get_data(chip);
++
++	__gpio_line_config(gpio, pin, W3K_GPIO_OUT);
++	/* set the state of the pin */
++	w3k_gpio_set_value(chip, pin, state);
++	return 0;
++}
++
++static int w3k_gpio_request(struct gpio_chip *chip, unsigned int pin)
++{
++#ifdef W3K_PINMUX
++	u32 data;
++	struct w3k_gpio *gpio = gpiochip_get_data(chip);
++	data = readl_relaxed(gpio->pinmux_addr );
++
++	data |= 1 << pin ;
++	writel_relaxed(data, gpio->pinmux_addr);
++#endif
++    return 0;
++}
++
++static void w3k_gpio_free(struct gpio_chip *chip, unsigned int pin)
++{
++#ifdef W3K_PINMUX
++	u32 data;
++	struct w3k_gpio *gpio = gpiochip_get_data(chip);
++
++	data = readl_relaxed(gpio->pinmux_addr );
++	data &= ~( 0x1 << pin );
++
++	writel_relaxed(data, gpio->pinmux_addr);
++#endif
++}
++
++/**
++ * w3k_gpio_irq_mask - Disable the interrupts for a gpio pin
++ * @irq_data:	per irq and chip data passed down to chip functions
++ *
++ */
++static void w3k_gpio_irq_mask(struct irq_data *irq_data)
++{
++	unsigned int pin;
++	struct w3k_gpio *gpio =
++		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
++
++	pin = irq_data->hwirq;
++	__gpio_line_set_interrupt_enable(gpio, pin , W3K_GPIO_INT_DE);
++}
++
++/**
++ * w3k_gpio_irq_unmask - Enable the interrupts for a gpio pin
++ * @irq_data:	irq data containing irq number of gpio pin for the interrupt
++ *		to enable
++ *
++ */
++static void w3k_gpio_irq_unmask(struct irq_data *irq_data)
++{
++	unsigned int pin;
++	struct w3k_gpio *gpio =
++		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
++	pin = irq_data->hwirq;
++	__gpio_line_set_interrupt_enable(gpio, pin, W3K_GPIO_INT_EN);
++}
++
++/**
++ * w3k_gpio_irq_ack - Acknowledge the interrupt of a gpio pin
++ * @irq_data:	irq data containing irq number of gpio pin for the interrupt
++ *		to ack
++ *
++ */
++static void w3k_gpio_irq_ack(struct irq_data *irq_data)
++{
++	unsigned int pin;
++	struct w3k_gpio *gpio =
++		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
++
++	pin = irq_data->hwirq;
++	writel_relaxed( (0x1 << pin ),  gpio->base_addr + GPIO_ITR_FLAG_REG);
++}
++
++/**
++ * w3k_gpio_set_irq_type - Set the irq type for a gpio pin
++ * @irq_data:	irq data containing irq number of gpio pin
++ * @type:	interrupt type that is to be set for the gpio pin
++ *
++ */
++static int w3k_gpio_set_irq_type(struct irq_data *irq_data, unsigned int type)
++{
++	unsigned int pin;
++	struct w3k_gpio *gpio =
++		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
++	unsigned int_type;
++	irq_flow_handler_t handler = handle_edge_irq;
++
++	pin = irq_data->hwirq;
++	switch (type) {
++	case IRQ_TYPE_EDGE_RISING:
++		int_type = W3K_GPIO_INT_RISING;
++		break;
++	case IRQ_TYPE_EDGE_FALLING:
++		int_type = W3K_GPIO_INT_FALLING;
++		break;
++	case IRQ_TYPE_EDGE_BOTH:
++		int_type = W3K_GPIO_INT_RISING_FALLING;
++		break;
++	case IRQ_TYPE_LEVEL_HIGH:
++		int_type = W3K_GPIO_INT_HIGH;
++		handler = handle_level_irq;
++		break;
++	case IRQ_TYPE_LEVEL_LOW:
++		int_type = W3K_GPIO_INT_LOW;
++		handler = handle_level_irq;
++		break;
++	default:
++		return -EINVAL;
++	}
++	__gpio_line_set_trigger(gpio, pin, int_type);
++	irq_set_handler_locked(irq_data, handler);
++	return 0;
++}
++
++/* irq chip descriptor */
++
++static struct irq_chip w3k_gpio_irqchip = {
++	.name		= DRIVER_NAME,
++	.irq_ack	= w3k_gpio_irq_ack,
++	.irq_mask	= w3k_gpio_irq_mask,
++	.irq_unmask	= w3k_gpio_irq_unmask,
++	.irq_set_type	= w3k_gpio_set_irq_type,
++};
++
++static void w3k_gpio_handle_irq(struct w3k_gpio *gpio,
++				      unsigned long pending)
++{
++	struct irq_domain *irqdomain = gpio->chip.irq.domain;
++	int offset;
++
++	if (!pending)
++		return;
++
++	for_each_set_bit(offset, &pending, 32) {
++		unsigned int gpio_irq;
++
++		gpio_irq = irq_find_mapping(irqdomain, offset);
++		generic_handle_irq(gpio_irq);
++	}
++}
++
++/**
++ * w3k_gpio_irqhandler - IRQ handler for a gpio device
++ * @desc:	irq descriptor instance of the 'irq'
++ *
++ * This function reads the Interrupt Status Register to get the
++ * gpio pin number which has triggered an interrupt. It then acks the triggered
++ * interrupt and calls the pin specific handler set by the higher layer
++ * application for that pin.
++ * Note: A bug is reported if no handler is set for the gpio pin.
++ */
++static void w3k_gpio_irqhandler(struct irq_desc *desc)
++{
++	u32 int_sts, int_enb;
++	struct w3k_gpio *gpio =
++		gpiochip_get_data(irq_desc_get_handler_data(desc));
++	struct irq_chip *irqchip = irq_desc_get_chip(desc);
++	chained_irq_enter(irqchip, desc);
++
++	int_sts = readl_relaxed(gpio->base_addr + GPIO_ITR_FLAG_REG);
++	int_enb = readl_relaxed(gpio->base_addr + GPIO_EINT_REG);
++	w3k_gpio_handle_irq(gpio, int_sts & int_enb);
++
++	chained_irq_exit(irqchip, desc);
++}
++
++static const struct w3k_platform_data w3k_gpio_def = {
++	.label = "w3k_gpio",
++	.ngpio = W3K_GPIO_NR_GPIOS,
++};
++
++static const struct of_device_id w3k_gpio_of_match[] = {
++	{ .compatible = "siliconwaves,w3k-gpio", .data = (void *)&w3k_gpio_def },
++	{ /* end of table */ }
++};
++MODULE_DEVICE_TABLE(of, w3k_gpio_of_match);
++
++/**
++ * w3k_gpio_probe - Initialization method for a w3k_gpio device
++ * @pdev:	platform device instance
++ *
++ * This function allocates memory resources for the gpio device and registers
++ * all the devices. It will also set up interrupts for the gpio
++ * pins.
++ * Note: Interrupts are disabled for all the devices  during initialization.
++ *
++ * Return: 0 on success, negative error otherwise.
++ */
++static int w3k_gpio_probe(struct platform_device *pdev)
++{
++	int ret;
++	struct w3k_gpio *gpio;
++	struct gpio_chip *chip;
++	const struct of_device_id *match;
++	struct gpio_irq_chip *girq;
++
++	gpio = devm_kzalloc(&pdev->dev, sizeof(*gpio), GFP_KERNEL);
++	if (!gpio)
++		return -ENOMEM;
++
++	match = of_match_node(w3k_gpio_of_match, pdev->dev.of_node);
++	if (!match) {
++		dev_err(&pdev->dev, "of_match_node() failed\n");
++		return -EINVAL;
++	}
++	gpio->p_data = match->data;
++
++	gpio->base_addr = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(gpio->base_addr)){
++		dev_err(&pdev->dev, "devm_platform_ioremap_resource() failed\n");
++		return PTR_ERR(gpio->base_addr);
++	}
++
++#ifdef W3K_PINMUX
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++	gpio->pinmux_addr = devm_ioremap_resource(&pdev->dev, res);
++	if (IS_ERR(gpio->pinmux_addr))
++		return PTR_ERR(gpio->pinmux_addr);
++#endif
++	gpio->irq = platform_get_irq(pdev, 0);
++	if (gpio->irq < 0) {
++		dev_err(&pdev->dev, "invalid IRQ\n");
++		return gpio->irq;
++	}
++
++	/* configure the gpio chip */
++	chip = &gpio->chip;
++	chip->label = gpio->p_data->label;
++	chip->owner = THIS_MODULE;
++	chip->parent = &pdev->dev;
++	chip->get = w3k_gpio_get_value;
++	chip->set = w3k_gpio_set_value;
++	chip->request = w3k_gpio_request;
++	chip->free = w3k_gpio_free;
++	chip->direction_input = w3k_gpio_dir_in;
++	chip->direction_output = w3k_gpio_dir_out;
++	chip->base = -1;
++	chip->ngpio = gpio->p_data->ngpio;
++
++	girq = &gpio->chip.irq;
++	girq->parent_handler = w3k_gpio_irqhandler;
++	girq->chip = &w3k_gpio_irqchip;
++	girq->num_parents = 1;
++	girq->parents = devm_kcalloc(&pdev->dev, 1, sizeof(*girq->parents),
++						GFP_KERNEL);
++	if (!girq->parents) {
++		ret = -ENOMEM;
++		goto out;
++	}
++	girq->parents[0] = gpio->irq;
++	girq->default_type = IRQ_TYPE_NONE;
++	girq->handler = handle_level_irq;
++	/* disable interrupts for all devices */
++	writel_relaxed(0x0, gpio->base_addr+ GPIO_EINT_REG );
++
++	ret = devm_gpiochip_add_data(&pdev->dev, &gpio->chip, gpio);
++	if (ret < 0) {
++		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
++		goto out;
++	}
++
++	platform_set_drvdata(pdev, gpio);
++	return 0;
++
++out:
++	return ret;
++}
++
++/**
++ * w3k_gpio_remove - Driver removal function
++ * @pdev:	platform device instance
++ *
++ * Return: 0 always
++ */
++static int w3k_gpio_remove(struct platform_device *pdev)
++{
++	struct w3k_gpio *gpio = platform_get_drvdata(pdev);
++
++	gpiochip_remove(&gpio->chip);
++	return 0;
++}
++
++static struct platform_driver w3k_gpio_driver = {
++	.driver	= {
++		.name = DRIVER_NAME,
++		.of_match_table = w3k_gpio_of_match,
++	},
++	.probe = w3k_gpio_probe,
++	.remove = w3k_gpio_remove,
++};
++
++/**
++ * w3k_gpio_init - Initial driver registration call
++ *
++ * Return: value from platform_driver_register
++ */
++static int __init w3k_gpio_init(void)
++{
++	return platform_driver_register(&w3k_gpio_driver);
++}
++postcore_initcall(w3k_gpio_init);
++
++static void __exit w3k_gpio_exit(void)
++{
++	platform_driver_unregister(&w3k_gpio_driver);
++}
++module_exit(w3k_gpio_exit);
++
++MODULE_DESCRIPTION("w3k GPIO driver");
++MODULE_LICENSE("GPL");
+-- 
+2.34.1
+
