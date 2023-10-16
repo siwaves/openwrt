@@ -26,7 +26,7 @@ ifeq ($(chip), ESP32-c6)
 endif
 
 ifeq ($(platform), w3k)
-	EXTRA_CFLAGS += -DCONFIG_W3K_TARGET
+	EXTRA_CFLAGS += -DCONFIG_DISABLE_SPIDEV_DTS
 endif
 
 ifeq ($(CONFIG_SUPPORT_ESP_SERIAL), y)

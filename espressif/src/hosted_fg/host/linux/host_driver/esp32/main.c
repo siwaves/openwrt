@@ -1005,7 +1005,7 @@ static int esp_gpio_init(void)
 		#ifdef CONFIG_W3K_TARGET
 		handshake = 15;//gpio15
 		#else
-		handshake = 509;//gpio13
+		handshake = 495;//gpio13
 		#endif
 	}
 	
@@ -1015,7 +1015,7 @@ static int esp_gpio_init(void)
 		#ifdef CONFIG_W3K_TARGET
 		dataready = 17;//gpio17
 		#else
-		dataready = 500;//gpio4
+		dataready = 496;//gpio4
 		#endif
 	}
 	
@@ -1025,7 +1025,7 @@ static int esp_gpio_init(void)
 		#ifdef CONFIG_W3K_TARGET
 		reset = 16;//gpio16
 		#else
-		reset = 506;//gpio10
+		reset = 497;//gpio10
 		#endif
 	}
 	
@@ -1047,7 +1047,9 @@ static int __init esp_init(void)
 	int ret = 0;
 	struct esp_adapter	*adapter = NULL;
 
+#ifdef CONFIG_DISABLE_SPIDEV_DTS
 	esp_gpio_init();
+#endif
 	
 	/* Reset ESP, Clean start ESP */
 	esp_reset();

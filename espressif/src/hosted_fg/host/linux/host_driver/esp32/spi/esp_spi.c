@@ -78,8 +78,6 @@ static void close_data_path(void)
 
 static irqreturn_t spi_data_ready_interrupt_handler(int irq, void * dev)
 {
-	printk (KERN_ERR "[DEON] --- %s: dataready interrupt received!\n", __func__);
-	
 	/* ESP peripheral has queued buffer for transmission */
  	if (spi_context.spi_workqueue)
  		queue_work(spi_context.spi_workqueue, &spi_context.spi_work);
@@ -89,8 +87,6 @@ static irqreturn_t spi_data_ready_interrupt_handler(int irq, void * dev)
 
 static irqreturn_t spi_interrupt_handler(int irq, void * dev)
 {
-	printk (KERN_ERR "[DEON] --- %s: handshake interrupt received!\n", __func__);
-	
 	/* ESP peripheral is ready for next SPI transaction */
 	if (spi_context.spi_workqueue)
 		queue_work(spi_context.spi_workqueue, &spi_context.spi_work);
@@ -307,8 +303,6 @@ static void esp_spi_work(struct work_struct *work)
 	rx_pending = gpio_get_value(esp_get_adapter()->pdev->dataready);
 #endif
 
-	printk (KERN_ERR "[DEON] --- %s: trans_ready=%d,rx_pending=%d!\n", __func__, trans_ready, rx_pending);
-
 	if (trans_ready) {
 		if (data_path) {
 			tx_skb = skb_dequeue(&spi_context.tx_q[PRIO_Q_SERIAL]);
@@ -398,7 +392,7 @@ static int spi_dev_init(struct esp_device *pdev, int spi_clk_mhz)
 	strlcpy(esp_board.modalias, "esp_spi", sizeof(esp_board.modalias));
 	esp_board.mode = SPI_MODE_2;
 	esp_board.max_speed_hz = spi_clk_mhz * NUMBER_1M;
-	esp_board.bus_num = 1;
+	esp_board.bus_num = 0;
 	esp_board.chip_select = 0;
 
 	master = spi_busnum_to_master(esp_board.bus_num);

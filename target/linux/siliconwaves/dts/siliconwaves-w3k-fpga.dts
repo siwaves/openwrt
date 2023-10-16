@@ -48,15 +48,16 @@
 
 &spi0 {
 	status = "okay";
+#if 0
 	esp32@0 {
 		compatible = "espressif,esp32-c6";
 		reg = <0>;
 		spi-max-frequency = <20000000>;
-		gpio-int = <8>;
-		handshake = <15>;
-		reset = <16>;
-		dataready = <17>;
+		handshake = <&gpio0 15 0>;
+		reset = <&gpio0 17 0>;
+		dataready = <&gpio0 16 0>;
 	};
+#endif
 };
 
 &sdhci0{
