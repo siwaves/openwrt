@@ -1,0 +1,151 @@
+From 004ebadcac2886dc0c683f2e3a1f91b9d31ee24b Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Tue, 17 Oct 2023 16:10:28 +0800
+Subject: [PATCH] siliconwaves: add w3k spi use tasklet
+
+---
+ drivers/spi/Kconfig   |  8 +++++++
+ drivers/spi/Makefile  |  3 +++
+ drivers/spi/spi-w3k.c | 51 ++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 61 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index 7faeda5c5..6bf6b091b 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -973,6 +973,14 @@ config SPI_W3K
+ 	help
+ 	  This option enables support for Siliconwaves w3k SPI Controller.
+ 
++if SPI_W3K
++config SPI_W3K_TASKLET
++	bool "W3K SPI tasklet"
++	depends on SPI_W3K
++	default n
++	help
++		Enable w3k spi controller use tasklet, don't use interrupt
++endif
+ #
+ # Add new SPI master controllers in alphabetical order above this line
+ #
+diff --git a/drivers/spi/Makefile b/drivers/spi/Makefile
+index b6c31866d..db07a0a41 100644
+--- a/drivers/spi/Makefile
++++ b/drivers/spi/Makefile
+@@ -131,6 +131,9 @@ obj-$(CONFIG_SPI_XTENSA_XTFPGA)		+= spi-xtensa-xtfpga.o
+ obj-$(CONFIG_SPI_ZYNQ_QSPI)		+= spi-zynq-qspi.o
+ obj-$(CONFIG_SPI_ZYNQMP_GQSPI)		+= spi-zynqmp-gqspi.o
+ obj-$(CONFIG_SPI_AMD)			+= spi-amd.o
++ifeq ($(CONFIG_SPI_W3K_TASKLET),y)
++	KBUILD_CFLAGS	+=	-DSPI_W3K_CONT_TRANSMIT
++endif
+ obj-$(CONFIG_SPI_W3K)			+= spi-w3k.o
+ 
+ # SPI slave protocol handlers
+diff --git a/drivers/spi/spi-w3k.c b/drivers/spi/spi-w3k.c
+index b5ca7a83e..99c4e95af 100644
+--- a/drivers/spi/spi-w3k.c
++++ b/drivers/spi/spi-w3k.c
+@@ -84,6 +84,9 @@ struct w3k_spi {
+ 	u8 *rx_buf;
+ 	int tx_len;
+ 	int rx_len;
++#ifdef SPI_W3K_CONT_TRANSMIT
++	struct tasklet_struct  tasklet_xmit;
++#endif
+ };
+ 
+ static inline u32 w3k_spi_read(struct w3k_spi *bs, unsigned reg)
+@@ -132,6 +135,39 @@ static inline void w3k_spi_write_fifo(struct w3k_spi *bs)
+ 	}
+ }
+ 
++#ifdef SPI_W3K_CONT_TRANSMIT
++static void spi_tx(unsigned long data)
++{
++	struct w3k_spi *bs = (struct w3k_spi*)data;
++	u8 byte;
++	int used, remaining;
++	unsigned long max_try = 0;
++	unsigned int status = w3k_spi_read(bs, SPI_FFCTL_REG);
++	status &= (~SPI_FFCTL_EN_TX_EMPTY_ITR);
++	w3k_spi_write(bs, SPI_FFCTL_REG, status);
++	while(max_try++ < 1000 && bs->tx_len > 0){
++		used = (w3k_spi_read(bs, SPI_FFSTA_REG) & SPI_FFSTA_TX_COUNT );
++		remaining = SPI_FIFO_FULL - used;
++		if(remaining == 0)
++			continue;
++		w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_PAUSE);
++		mb();
++		while(bs->tx_len > 0 && remaining > 0){
++			byte = bs->tx_buf ? *bs->tx_buf++ : 0;
++			w3k_spi_write(bs, SPI_RDT_REG, byte);
++			bs->tx_len--;
++			remaining--;
++		}
++		wmb();
++		w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_RESUME);
++		w3k_spi_read_fifo(bs);
++	}
++	w3k_spi_read_fifo(bs);
++	mb();
++	complete(&bs->done);
++}
++#endif
++
+ static irqreturn_t w3k_spi_interrupt(int irq, void *dev_id)
+ {
+ 	struct spi_master *master = dev_id;
+@@ -172,14 +208,20 @@ static int w3k_spi_start_transfer(struct spi_device *spi,
+ 	struct w3k_spi *bs = spi_master_get_devdata(spi->master);
+ 	unsigned long spi_hz, clk_hz, cdiv;
+ 	u32 cfg=0;
++#ifndef SPI_W3K_CONT_TRANSMIT
+ 	u32 status;
++#endif
+ 
+     /* set clock */
+     spi_hz = tfr->speed_hz;
+     clk_hz = W3K_CLOCK_HZ;
+     /* if spi : 50M, clk_hz : 50M, max: 25M */
+ 	if (spi_hz >= clk_hz / 2) {
+-		cdiv = 2; /* clk_hz/2 is the fastest we can go */
++#ifdef SPI_W3K_CONT_TRANSMIT
++		cdiv = 0; /* clk_hz/2 is the fastest we can go */
++#else
++		cdiv = 2;
++#endif
+ 	} else if (spi_hz) {
+ 		cdiv = (int)((clk_hz >>1)/ spi_hz );
+ 		if (cdiv)
+@@ -203,6 +245,9 @@ static int w3k_spi_start_transfer(struct spi_device *spi,
+ 	bs->tx_len = tfr->len;
+ 	bs->rx_len = tfr->len;
+ 
++#ifdef SPI_W3K_CONT_TRANSMIT
++	tasklet_schedule(&bs->tasklet_xmit);
++#else
+ 	w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_PAUSE);
+ 	w3k_spi_write_fifo(bs);
+ 	w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_RESUME);
+@@ -210,6 +255,7 @@ static int w3k_spi_start_transfer(struct spi_device *spi,
+ 	status = w3k_spi_read(bs, SPI_FFCTL_REG);
+ 	status |= SPI_FFCTL_EN_TX_EMPTY_ITR;
+ 	w3k_spi_write(bs, SPI_FFCTL_REG, status);
++#endif
+ 	return 0;
+ }
+ 
+@@ -333,6 +379,9 @@ static int w3k_spi_probe(struct platform_device *pdev)
+ 		goto out_master_put;
+ 	}
+ 
++#ifdef SPI_W3K_CONT_TRANSMIT
++	tasklet_init(&bs->tasklet_xmit, spi_tx , (unsigned long)bs);
++#endif
+ 	printk(KERN_INFO "w3k SoC SPI driver initialized\n");
+ 
+ 	return 0;
+-- 
+2.34.1
+
