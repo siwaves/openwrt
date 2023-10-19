@@ -102,7 +102,7 @@
 			reg-offset = <0x100>;
 			interrupts = <7>;
 			baud = <115200>;
-			clock-frequency = <25000000>;
+			clock-frequency = <37500000>;
 			status = "disabled";
 		};
 		uart1: serial@3e103200 {
@@ -114,7 +114,7 @@
 			reg-offset = <0x0>;
 			interrupts = <7>;
 			baud = <115200>;
-			clock-frequency = <25000000>;
+			clock-frequency = <37500000>;
 			status = "disabled";
 		};
 		sdhci0: sdhci@3e101000 {
