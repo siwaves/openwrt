@@ -1,0 +1,27 @@
+#!/bin/sh
+
+mode="$1"
+
+if [ -b /dev/esp0 ]; then
+    mknod /dev/esp0 c 221 0
+    chmod 666 /dev/esp0
+    echo "/dev/esp0 device created"
+fi
+
+if [ "$mode" == "sta" ]; then
+    esp-test sta_connect
+    uci set network.wan.device="ethsta0"
+    uci set network.wan6.device='ethsta0'
+    uci set network.lan.device='eth0'
+    uci commit network
+    /etc/init.d/network restart
+elif [ "$mode" == "ap" ]; then
+    esp-test softap_start
+    uci set network.wan.device="eth0"
+    uci set network.wan6.device='eth0'
+    uci set network.lan.device='ethap0'
+    uci commit network
+    /etc/init.d/network restart
+else
+    echo "esptools [ap/sta]"
+fi
