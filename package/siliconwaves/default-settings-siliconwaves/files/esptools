@@ -2,7 +2,7 @@
 
 mode="$1"
 
-if [ -b /dev/esp0 ]; then
+if ! test -e /dev/esp0 ; then
     mknod /dev/esp0 c 221 0
     chmod 666 /dev/esp0
     echo "/dev/esp0 device created"
