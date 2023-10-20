@@ -49,7 +49,7 @@ define Device/siliconwaves-w3k-fpga
   IMAGE/factory.img.gz := boot-common-w3k |sdcard-img-ext4 |gzip
   DEVICE_DTS_DIR := ../dts
   DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver c_support \
-		     kmod-shortcut-fe-cm
+		     kmod-shortcut-fe-cm iperf3
 endef
 ifeq ($(SUBTARGET),w3k)
   TARGET_DEVICES += siliconwaves-w3k-fpga
