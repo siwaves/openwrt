@@ -1,0 +1,126 @@
+From 7af70c83c42ce1a18ae4cb23b0ed0b260399d6a6 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Fri, 20 Oct 2023 10:02:15 +0800
+Subject: [PATCH] siliconwaves: w3k spi use cont-transmit
+
+---
+ drivers/spi/Kconfig   |  6 +++---
+ drivers/spi/Makefile  |  2 +-
+ drivers/spi/spi-w3k.c | 17 ++++++++---------
+ 3 files changed, 12 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index 6bf6b091b..1a83b3b0d 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -974,12 +974,12 @@ config SPI_W3K
+ 	  This option enables support for Siliconwaves w3k SPI Controller.
+ 
+ if SPI_W3K
+-config SPI_W3K_TASKLET
+-	bool "W3K SPI tasklet"
++config SPI_W3K_CONT_TRANSMIT
++	bool "W3K SPI continuous transfer"
+ 	depends on SPI_W3K
+ 	default n
+ 	help
+-		Enable w3k spi controller use tasklet, don't use interrupt
++		Enable w3k spi controller continuous transfer, don't use interrupt
+ endif
+ #
+ # Add new SPI master controllers in alphabetical order above this line
+diff --git a/drivers/spi/Makefile b/drivers/spi/Makefile
+index db07a0a41..a0c9965de 100644
+--- a/drivers/spi/Makefile
++++ b/drivers/spi/Makefile
+@@ -131,7 +131,7 @@ obj-$(CONFIG_SPI_XTENSA_XTFPGA)		+= spi-xtensa-xtfpga.o
+ obj-$(CONFIG_SPI_ZYNQ_QSPI)		+= spi-zynq-qspi.o
+ obj-$(CONFIG_SPI_ZYNQMP_GQSPI)		+= spi-zynqmp-gqspi.o
+ obj-$(CONFIG_SPI_AMD)			+= spi-amd.o
+-ifeq ($(CONFIG_SPI_W3K_TASKLET),y)
++ifeq ($(CONFIG_SPI_W3K_CONT_TRANSMIT),y)
+ 	KBUILD_CFLAGS	+=	-DSPI_W3K_CONT_TRANSMIT
+ endif
+ obj-$(CONFIG_SPI_W3K)			+= spi-w3k.o
+diff --git a/drivers/spi/spi-w3k.c b/drivers/spi/spi-w3k.c
+index 99c4e95af..73f3356f3 100644
+--- a/drivers/spi/spi-w3k.c
++++ b/drivers/spi/spi-w3k.c
+@@ -84,9 +84,6 @@ struct w3k_spi {
+ 	u8 *rx_buf;
+ 	int tx_len;
+ 	int rx_len;
+-#ifdef SPI_W3K_CONT_TRANSMIT
+-	struct tasklet_struct  tasklet_xmit;
+-#endif
+ };
+ 
+ static inline u32 w3k_spi_read(struct w3k_spi *bs, unsigned reg)
+@@ -136,9 +133,8 @@ static inline void w3k_spi_write_fifo(struct w3k_spi *bs)
+ }
+ 
+ #ifdef SPI_W3K_CONT_TRANSMIT
+-static void spi_tx(unsigned long data)
++static void spi_tx(struct w3k_spi *bs)
+ {
+-	struct w3k_spi *bs = (struct w3k_spi*)data;
+ 	u8 byte;
+ 	int used, remaining;
+ 	unsigned long max_try = 0;
+@@ -239,14 +235,16 @@ static int w3k_spi_start_transfer(struct spi_device *spi,
+ 
+      w3k_spi_write(bs, SPI_CFG_REG, cfg);
+ 
++#ifndef SPI_W3K_CONT_TRANSMIT
+ 	reinit_completion(&bs->done);
++#endif
+ 	bs->tx_buf = tfr->tx_buf;
+ 	bs->rx_buf = tfr->rx_buf;
+ 	bs->tx_len = tfr->len;
+ 	bs->rx_len = tfr->len;
+ 
+ #ifdef SPI_W3K_CONT_TRANSMIT
+-	tasklet_schedule(&bs->tasklet_xmit);
++	spi_tx(bs);
+ #else
+ 	w3k_spi_write(bs, SPI_PAS_REG, SPI_PAS_TX_PAUSE);
+ 	w3k_spi_write_fifo(bs);
+@@ -287,7 +285,9 @@ static int w3k_spi_transfer_one(struct spi_master *master,
+ 	struct spi_transfer *tfr;
+ 	struct spi_device *spi = mesg->spi;
+ 	int err = 0;
++#ifndef SPI_W3K_CONT_TRANSMIT
+ 	unsigned int timeout;
++#endif
+ 	int trsnum =0;
+ 
+ 
+@@ -301,6 +301,7 @@ static int w3k_spi_transfer_one(struct spi_master *master,
+ 		if (err)
+ 			goto out;
+ 
++#ifndef SPI_W3K_CONT_TRANSMIT
+ 		timeout = wait_for_completion_timeout(
+ 			&bs->done,
+ 			msecs_to_jiffies(W3K_SPI_TIMEOUT_MS)
+@@ -309,6 +310,7 @@ static int w3k_spi_transfer_one(struct spi_master *master,
+ 			err = -ETIMEDOUT;
+ 			goto out;
+ 		}
++#endif
+ 
+ 		err = w3k_spi_finish_transfer(spi, tfr);
+ 		if (err)
+@@ -379,9 +381,6 @@ static int w3k_spi_probe(struct platform_device *pdev)
+ 		goto out_master_put;
+ 	}
+ 
+-#ifdef SPI_W3K_CONT_TRANSMIT
+-	tasklet_init(&bs->tasklet_xmit, spi_tx , (unsigned long)bs);
+-#endif
+ 	printk(KERN_INFO "w3k SoC SPI driver initialized\n");
+ 
+ 	return 0;
+-- 
+2.34.1
+
