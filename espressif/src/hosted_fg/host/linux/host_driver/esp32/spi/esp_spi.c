@@ -540,6 +540,7 @@ static int spi_init(struct esp_device * pdev)
 		spi_exit(pdev);
 		return -EFAULT;
 	}
+	set_cpus_allowed_ptr(current, cpumask_of(1));
 
 	printk(KERN_INFO "ESP: SPI host config: GPIOs: Handshake[%u] DataReady[%u]",
 			pdev->handshake, pdev->dataready);
