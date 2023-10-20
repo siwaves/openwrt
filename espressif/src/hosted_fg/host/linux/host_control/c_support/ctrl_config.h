@@ -65,8 +65,8 @@
 
 /* softap mode */
 #define SOFTAP_MODE_MAC_ADDRESS             "cc:bb:aa:ee:ff:dd"
-#define SOFTAP_MODE_SSID                    "ESPWifi"
-#define SOFTAP_MODE_PWD                     "ESPWifi@123"
+#define SOFTAP_MODE_SSID                    "CCMC-TEST"
+#define SOFTAP_MODE_PWD                     "12345678"
 #define SOFTAP_MODE_CHANNEL                 1
 #define SOFTAP_MODE_ENCRYPTION_MODE         3
 #define SOFTAP_MODE_MAX_ALLOWED_CLIENTS     4
