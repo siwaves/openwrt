@@ -189,5 +189,13 @@
 			interrupt-controller;
 			reg = <0x0 0x3e204000 0x0 0x1000>;
 		};
+		qspi: qspi@3e102000 {
+			compatible = "siliconwaves,w3k-qspi";
+			reg = <0x0 0x3e102000 0x0 0x1000>,
+					<0x0 0x58000000 0x0 0x08000000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <21>;
+			status = "disabled";
+		};
 	};
 };

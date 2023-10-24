@@ -63,3 +63,42 @@
 &sdhci0{
 	status = "okay";
 };
+
+&qspi {
+	status = "okay";
+	flash0: w25q256jw@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "winbond,w25q256jw", "jedec,spi-nor";
+		spi-max-frequency = <20000000>;
+		partitions {
+			compatible = "fixed-partitions";
+			//128KB
+			partition@0 {
+				label = "u-boot-spl";
+				reg = <0x0 0x20000>;
+				read-only;
+			};
+			//1024KB
+			partition@20000 {
+				label = "u-boot";
+				reg = <0x20000 0x100000>;
+			};
+			//64KB
+			partition@120000 {
+				label = "u-boot-env";
+				reg = <0x120000 0x10000>;
+			};
+			//64KB
+			factory: partition@130000 {
+				label = "factory";
+				reg = <0x130000 0x10000>;
+			};
+			partition@140000 {
+				compatible = "denx,uimage";
+				label = "firmware";
+				reg = <0x140000 0x1EC0000>;
+			};
+		};
+	};
+};
