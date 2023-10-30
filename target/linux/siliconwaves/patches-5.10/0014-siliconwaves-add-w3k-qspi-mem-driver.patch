@@ -1,0 +1,539 @@
+From f0831955acdcfc8e7f6177dd69f51b9b10efe991 Mon Sep 17 00:00:00 2001
+From: Richard Dai <richard@siliconwaves.com>
+Date: Mon, 30 Oct 2023 10:12:46 +0800
+Subject: [PATCH] siliconwaves:add w3k qspi-mem driver
+
+---
+ drivers/spi/Kconfig        |   7 +
+ drivers/spi/Makefile       |   1 +
+ drivers/spi/spi-w3k-qspi.c | 488 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 496 insertions(+)
+ create mode 100644 drivers/spi/spi-w3k-qspi.c
+
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index 1a83b3b0d..8fcbfd5f0 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -981,6 +981,13 @@ config SPI_W3K_CONT_TRANSMIT
+ 	help
+ 		Enable w3k spi controller continuous transfer, don't use interrupt
+ endif
++
++config SPI_W3K_QSPI
++	tristate "W3K QSPI controller"
++	depends on SPI_MASTER && SOC_SILICONWAVES
++	help
++	  This option enables support for Siliconwaves w3k QSPI Controller.
++
+ #
+ # Add new SPI master controllers in alphabetical order above this line
+ #
+diff --git a/drivers/spi/Makefile b/drivers/spi/Makefile
+index a0c9965de..6b8b8f6c9 100644
+--- a/drivers/spi/Makefile
++++ b/drivers/spi/Makefile
+@@ -135,6 +135,7 @@ ifeq ($(CONFIG_SPI_W3K_CONT_TRANSMIT),y)
+ 	KBUILD_CFLAGS	+=	-DSPI_W3K_CONT_TRANSMIT
+ endif
+ obj-$(CONFIG_SPI_W3K)			+= spi-w3k.o
++obj-$(CONFIG_SPI_W3K_QSPI)		+= spi-w3k-qspi.o
+ 
+ # SPI slave protocol handlers
+ obj-$(CONFIG_SPI_SLAVE_TIME)		+= spi-slave-time.o
+diff --git a/drivers/spi/spi-w3k-qspi.c b/drivers/spi/spi-w3k-qspi.c
+new file mode 100644
+index 000000000..02afb5f26
+--- /dev/null
++++ b/drivers/spi/spi-w3k-qspi.c
+@@ -0,0 +1,488 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2023 Siliconwaves, Inc.
++ *
++ * Author: Richard Dai <richard@siliconwaves.com>
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of_irq.h>
++#include <linux/of_address.h>
++#include <linux/platform_device.h>
++#include <linux/spi/spi.h>
++#include <linux/spi/spi-mem.h>
++#include <linux/iopoll.h>
++
++#define ASPI_REG_CLOCK			0x00
++#define ASPI_REG_GO		        0x04
++#define ASPI_REG_CHAIN			0x08
++#define ASPI_REG_CMD1			0x0c
++#define ASPI_REG_CMD2			0x10
++#define ASPI_REG_ADDR1			0x14
++#define ASPI_REG_ADDR2			0x18
++#define ASPI_REG_PERF1			0x1c
++#define ASPI_REG_PERF2			0x20
++#define ASPI_REG_HI_Z			0x24
++#define ASPI_REG_BYTE_COUNT		0x28
++#define ASPI_REG_DATA1			0x2c
++#define ASPI_REG_DATA2			0x30
++#define ASPI_REG_FINISH			0x34
++#define ASPI_REG_XIP			0x38
++#define ASPI_REG_FIFO_STATUS	0x3c
++#define ASPI_REG_LAT			0x40
++#define ASPI_REG_OUT_DELAY_0	0x44
++#define ASPI_REG_OUT_DELAY_1	0x48
++#define ASPI_REG_IN_DELAY_0		0x4c
++#define ASPI_REG_IN_DELAY_1		0x50
++#define ASPI_REG_DQS_DELAY		0x54
++#define ASPI_REG_STATUS			0x58
++#define ASPI_REG_IRQ_ENABLE		0x5c
++#define ASPI_REG_IRQ_STATUS		0x60
++#define ASPI_REG_AXI_BAR		0x64
++#define ASPI_REG_READ_CFG		0x6c
++
++#define ASPI_CLK_SW_RESET		BIT(0)
++#define ASPI_CLK_RESET_BUF		BIT(1)
++#define ASPI_CLK_RESET_ALL		(ASPI_CLK_SW_RESET | ASPI_CLK_RESET_BUF)
++#define ASPI_CLK_SPI_MODE3		BIT(2)
++#define ASPI_CLOCK_DIV_MASK		(0xff << 8)
++#define ASPI_CLOCK_DIV(div)		(((div) << 8) & ASPI_CLOCK_DIV_MASK)
++
++#define ASPI_TIMEOUT_US			100000
++
++#define ASPI_DATA_LEN_MASK		0x3fff
++#define ASPI_MAX_XFER_LEN		(size_t)(ASPI_DATA_LEN_MASK + 1)
++
++#define MODE_IO_X1			(0 << 16)
++#define MODE_IO_X2			(1 << 16)
++#define MODE_IO_X4			(2 << 16)
++#define MODE_IO_SDR_POS_SKEW		(0 << 20)
++#define MODE_IO_SDR_NEG_SKEW		(1 << 20)
++#define MODE_IO_DDR_34_SKEW		(2 << 20)
++#define MODE_IO_DDR_PN_SKEW		(3 << 20)
++#define MODE_IO_DDR_DQS			(5 << 20)
++
++#define ASPI_STATUS_BUSY		BIT(2)
++
++/*
++ * This mask only matches the chain length for the DATA2 register. That's okay
++ * since we only need to use it with DATA2. The other masks are:
++ * DATA2:	0x3fff
++ * CMD2:	0x0003
++ * ADDR2:	0x0007
++ * PERF2:	0x0000
++ * HI_Z:	0x003f
++ * BCNT:	0x0007
++ */
++#define CHAIN_LEN(x)		(((x) - 1) & ASPI_DATA_LEN_MASK)
++
++struct w3k_qspi {
++	struct		device *dev;
++	uintptr_t	regbase;
++	uintptr_t	xipbase;
++	uint32_t	xfer_mode_cmd;
++	uint32_t	xfer_mode_addr;
++	uint32_t	xfer_mode_data;
++	uint8_t		num_hi_z_clocks;
++};
++
++struct qspi_io_chain {
++	uint8_t action;
++	uint32_t data;
++	uint16_t data_len;
++	uint32_t mode;
++};
++
++enum chain_code {
++	CHAIN_NOP = 0,
++	CHAIN_CMD = 1,
++	CHAIN_ADDR = 2,
++	CHAIN_WTFIUM = 3,
++	CHAIN_HI_Z = 4,
++	CHAIN_DATA_OUT = 5,
++	CHAIN_DATA_IN = 6,
++	CHAIN_FINISH = 7,
++};
++
++static const struct chain_to_reg {
++	uint8_t data_reg;
++	uint8_t ctl_reg;
++} chain_to_reg_map[] = {
++	[CHAIN_NOP] =		{0, 0},
++	[CHAIN_CMD] =		{ASPI_REG_CMD1, ASPI_REG_CMD2},
++	[CHAIN_ADDR] =		{ASPI_REG_ADDR1, ASPI_REG_ADDR2},
++	[CHAIN_WTFIUM] =	{0, 0},
++	[CHAIN_HI_Z] =		{0, ASPI_REG_HI_Z},
++	[CHAIN_DATA_OUT] =	{0, ASPI_REG_DATA2},
++	[CHAIN_DATA_IN] =	{0, ASPI_REG_DATA2},
++	[CHAIN_FINISH] =	{0, ASPI_REG_FINISH},
++};
++
++static uint32_t aspi_read_reg(struct w3k_qspi *aspi, uint8_t reg)
++{
++	return readl((void *)(aspi->regbase + reg));
++};
++
++static void aspi_write_reg(struct w3k_qspi *aspi, uint8_t reg, uint32_t val)
++{
++	writel(val, (void *)(aspi->regbase + reg));
++};
++
++static size_t aspi_get_fifo_level(struct w3k_qspi *aspi)
++{
++	return aspi_read_reg(aspi, ASPI_REG_FIFO_STATUS) & 0xff;
++}
++
++static void aspi_drain_fifo(struct w3k_qspi *aspi, uint8_t *buf, size_t len)
++{
++	uint32_t data;
++
++	aspi_write_reg(aspi, ASPI_REG_BYTE_COUNT, sizeof(uint32_t));
++	while (len >= 4) {
++		data = aspi_read_reg(aspi, ASPI_REG_DATA1);
++		memcpy(buf, &data, sizeof(data));
++		buf += 4;
++		len -= 4;
++	}
++
++	if (len) {
++		aspi_write_reg(aspi, ASPI_REG_BYTE_COUNT, len);
++		data = aspi_read_reg(aspi, ASPI_REG_DATA1);
++		memcpy(buf, &data, len);
++	}
++}
++
++static void aspi_seed_fifo(struct w3k_qspi *aspi,
++			   const uint8_t *buf, size_t len)
++{
++	uint32_t data;
++
++	aspi_write_reg(aspi, ASPI_REG_BYTE_COUNT, sizeof(uint32_t));
++	while (len >= 4) {
++		memcpy(&data, buf, sizeof(data));
++		aspi_write_reg(aspi, ASPI_REG_DATA1, data);
++		buf += 4;
++		len -= 4;
++	}
++
++	if (len) {
++		aspi_write_reg(aspi, ASPI_REG_BYTE_COUNT, len);
++		memcpy(&data, buf, len);
++		aspi_write_reg(aspi, ASPI_REG_DATA1, data);
++	}
++	wmb();
++}
++
++static int aspi_wait_idle(struct w3k_qspi *aspi)
++{
++	uint32_t status;
++	void *status_reg = (void *)(aspi->regbase + ASPI_REG_STATUS);
++
++	return readl_poll_timeout(status_reg, status,
++				  !(status & ASPI_STATUS_BUSY),
++				  1, ASPI_TIMEOUT_US);
++}
++
++static int aspi_poll_and_seed_fifo(struct w3k_qspi *aspi,
++				   const void *src_addr, size_t len)
++{
++	size_t wait_us, fifo_space = 0, xfer_len;
++	const uint8_t *src = src_addr;
++
++	while (len > 0) {
++		wait_us = 0;
++		while (wait_us++ < ASPI_TIMEOUT_US) {
++			fifo_space = 64 - aspi_get_fifo_level(aspi);
++			if (fifo_space)
++				break;
++			udelay(1);
++		}
++
++		xfer_len = min(len, fifo_space);
++		aspi_seed_fifo(aspi, src, xfer_len);
++		src += xfer_len;
++		len -= xfer_len;
++	}
++
++	return 0;
++}
++
++static void aspi_setup_chain(struct w3k_qspi *aspi,
++			     const struct qspi_io_chain *chain,
++			     size_t chain_len)
++{
++	size_t i;
++	uint32_t chain_reg = 0;
++	const struct qspi_io_chain *link;
++	const struct chain_to_reg *regs;
++
++	for (link = chain, i = 0; i < chain_len; i++, link++) {
++		regs = &chain_to_reg_map[link->action];
++
++		if (link->data_len && regs->data_reg)
++			aspi_write_reg(aspi, regs->data_reg, link->data);
++
++		if (regs->ctl_reg)
++			aspi_write_reg(aspi, regs->ctl_reg,
++				       CHAIN_LEN(link->data_len) | link->mode);
++
++		chain_reg |= link->action << (i * 4);
++	}
++
++	chain_reg |= CHAIN_FINISH << (i * 4);
++
++	aspi_write_reg(aspi, ASPI_REG_CHAIN, chain_reg);
++}
++
++static int aspi_execute_chain(struct w3k_qspi *aspi)
++{
++	/* Go, johnny go */
++	aspi_write_reg(aspi, ASPI_REG_GO, 1);
++	return aspi_wait_idle(aspi);
++}
++static uint32_t buswidth_to_mode(uint32_t buswidth)
++{
++	uint32_t mode;
++	switch (buswidth)
++	{
++	case 1:
++		mode = MODE_IO_X1;
++	break;
++	case 2:
++		mode = MODE_IO_X2;
++	break;
++	case 4:
++		mode = MODE_IO_X4;
++	break;
++	default:
++		mode = MODE_IO_X1;
++		break;
++	}
++	return mode;
++}
++
++static int w3k_qspi_exec_mem_op(struct spi_mem *mem,
++				 const struct spi_mem_op *op)
++{
++	struct w3k_qspi *aspi = spi_controller_get_devdata(mem->spi->master);
++	int chain_size = 0, i, len;
++	int rw_regs = 0;
++	uint32_t addr;
++	u8 *buf;
++    struct qspi_io_chain chain[4] = {0};
++	dev_dbg(aspi->dev, "cmd:%#x mode:%d.%d.%d.%d, nbytes:%d.%d.%d.%d\n",
++		op->cmd.opcode, op->cmd.buswidth, op->addr.buswidth,
++		op->dummy.buswidth, op->data.buswidth,
++		op->cmd.nbytes,op->addr.nbytes,op->dummy.nbytes,
++		op->data.nbytes);
++
++    if (op->cmd.opcode) {
++		chain[chain_size].action = CHAIN_CMD;
++		chain[chain_size].data = op->cmd.opcode;
++		chain[chain_size].data_len = op->cmd.nbytes;
++		chain[chain_size].mode = buswidth_to_mode(op->cmd.buswidth);
++		chain_size++;
++    }
++
++    if (op->addr.nbytes) {
++		chain[chain_size].action = CHAIN_ADDR;
++		chain[chain_size].data = op->addr.val;
++		chain[chain_size].data_len = op->addr.nbytes;
++		chain[chain_size].mode = buswidth_to_mode(op->addr.buswidth);
++		chain_size++;
++    }else {
++		/*read/write slave regsiters*/
++		rw_regs = 1;
++	}
++
++    if (op->dummy.nbytes) {
++		chain[chain_size].action = CHAIN_HI_Z;
++		chain[chain_size].data = 0;
++		chain[chain_size].data_len = op->dummy.nbytes;
++		chain[chain_size].mode = buswidth_to_mode(op->dummy.buswidth);
++		chain_size++;
++    }
++    /* read/write data */
++    if (op->data.nbytes) {
++		if(op->data.dir == SPI_MEM_DATA_OUT){
++			/* spi master write data to slave */
++			chain[chain_size].action = CHAIN_DATA_OUT;
++			chain[chain_size].data = 0;
++			chain[chain_size].data_len = op->data.nbytes;
++			chain[chain_size].mode = buswidth_to_mode(op->data.buswidth);
++			buf = (u8 *)op->data.buf.out;
++			len = op->data.nbytes;
++			if(rw_regs){
++				/*write regs*/
++				for (i = 0, addr = 0; i < len; i++)
++					addr |= buf[len - 1 - i] << (i * 8);
++				chain[chain_size].data = addr;
++				aspi_setup_chain(aspi, chain, ++chain_size);
++				return aspi_execute_chain(aspi);
++			}else{
++				/*write pages*/
++				aspi_setup_chain(aspi, chain, ++chain_size);
++				/* Go, johnny go */
++				aspi_write_reg(aspi, ASPI_REG_GO, 1);
++				aspi_poll_and_seed_fifo(aspi, buf, len);
++				return aspi_wait_idle(aspi);
++			}
++		}else {
++			/* spi master read data from slave */
++			chain[chain_size].action = CHAIN_DATA_IN;
++			chain[chain_size].data = 0;
++			chain[chain_size].data_len = op->data.nbytes;
++			chain[chain_size].mode = buswidth_to_mode(op->data.buswidth);
++			len = op->data.nbytes;
++			chain_size++;
++			if(rw_regs){
++				/*read regs*/
++				if (len >= 8)
++					return -EMSGSIZE;
++				aspi_setup_chain(aspi, chain, chain_size);
++				aspi_execute_chain(aspi);
++				aspi_drain_fifo(aspi, op->data.buf.in, len);
++				return 0;
++			}else{
++				/*read page*/
++				void *from_xip = (void *)(aspi->xipbase + op->addr.val);
++				aspi_setup_chain(aspi, chain, chain_size);
++				memcpy(op->data.buf.in, from_xip, len);
++				return len;
++			}
++		}
++    }else {
++		/*earase sector/chip, regs op*/
++		aspi_setup_chain(aspi, chain, chain_size);
++		return aspi_execute_chain(aspi);
++	}
++}
++
++static bool w3k_qspi_supports_op(struct spi_mem *mem,
++				  const struct spi_mem_op *op)
++{
++	if (!spi_mem_default_supports_op(mem, op))
++		return false;
++	return true;
++}
++
++/* TODO: Revisit this when we get actual HW. Right now max speed is 6 MHz. */
++static void aspi_configure_clocks(struct w3k_qspi *aspi)
++{
++	uint8_t div = 1;
++	uint32_t ck_ctl = aspi_read_reg(aspi, ASPI_REG_CLOCK);
++
++	ck_ctl &= ~ASPI_CLOCK_DIV_MASK;
++	ck_ctl |= ASPI_CLOCK_DIV(div);
++	aspi_write_reg(aspi, ASPI_REG_CLOCK, ck_ctl);
++}
++
++static int w3k_qspi_setup_op(struct spi_device *spi)
++{
++	struct spi_controller *ctlr = spi->master;
++	struct w3k_qspi *aspi = spi_controller_get_devdata(ctlr);
++
++	if (ctlr->busy)
++		return -EBUSY;
++    /* Reset the controller */
++	aspi_write_reg(aspi, ASPI_REG_CLOCK, ASPI_CLK_RESET_ALL);
++	aspi_write_reg(aspi, ASPI_REG_LAT, 0x010);
++	aspi_configure_clocks(aspi);
++
++	return 0;
++}
++
++static const struct spi_controller_mem_ops w3k_qspi_mem_ops = {
++	.supports_op = w3k_qspi_supports_op,
++	.exec_op = w3k_qspi_exec_mem_op,
++};
++
++/**
++ * w3k_qspi_probe - Probe method for the QSPI driver
++ * @pdev:	Pointer to the platform_device structure
++ *
++ * This function initializes the driver data structures and the hardware.
++ *
++ * Return:	0 on success and error value on failure
++ */
++static int w3k_qspi_probe(struct platform_device *pdev)
++{
++	int ret = 0;
++	struct spi_controller *ctlr;
++	struct device *dev = &pdev->dev;
++	struct device_node *np = dev->of_node;
++    struct w3k_qspi *aspi;
++    void __iomem *mmiobase;
++
++    ctlr = spi_alloc_master(&pdev->dev, sizeof(*aspi));
++	if (!ctlr)
++		return -ENOMEM;
++
++	aspi = spi_controller_get_devdata(ctlr);
++	aspi->dev = dev;
++	platform_set_drvdata(pdev, aspi);
++
++    mmiobase = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(mmiobase)) {
++		ret = PTR_ERR(mmiobase);
++		goto remove_master;
++	}
++	aspi->regbase = (uintptr_t)mmiobase;
++    mmiobase = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(mmiobase)) {
++		ret = PTR_ERR(mmiobase);
++		goto remove_master;
++	}
++	aspi->xipbase = (uintptr_t)mmiobase;
++    ctlr->num_chipselect = 1;
++
++    ctlr->mode_bits =  SPI_RX_DUAL | SPI_RX_QUAD |
++        SPI_TX_DUAL | SPI_TX_QUAD;
++	ctlr->mem_ops = &w3k_qspi_mem_ops;
++	ctlr->setup = w3k_qspi_setup_op;
++	ctlr->dev.of_node = np;
++
++    ret = devm_spi_register_controller(&pdev->dev, ctlr);
++	if (ret) {
++		dev_err(&pdev->dev, "spi_register_master failed\n");
++		goto remove_master;
++	}
++	return ret;
++remove_master:
++	spi_controller_put(ctlr);
++
++	return ret;
++}
++
++
++static int w3k_qspi_remove(struct platform_device *pdev)
++{
++	return 0;
++}
++
++static const struct of_device_id w3k_qspi_of_match[] = {
++	{ .compatible = "siliconwaves,w3k-qspi", },
++	{ /* end of table */ }
++};
++
++MODULE_DEVICE_TABLE(of, w3k_qspi_of_match);
++
++static struct platform_driver w3k_qspi_driver = {
++	.probe = w3k_qspi_probe,
++	.remove = w3k_qspi_remove,
++	.driver = {
++		.name = "w3k-qspi",
++		.of_match_table = w3k_qspi_of_match,
++	},
++};
++
++module_platform_driver(w3k_qspi_driver);
++
++MODULE_AUTHOR("Siliconwaves, Inc.");
++MODULE_DESCRIPTION("Siliconwaves W3K QSPI driver");
++MODULE_AUTHOR("Richard Dai <richard@siliconawves.com>");
++MODULE_LICENSE("GPL");
+-- 
+2.34.1
+
