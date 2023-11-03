@@ -16,15 +16,15 @@ define Build/Compile
    $(CP) $(LINUX_DIR)/COPYING $(KDIR)/COPYING.linux
 endef
 
-define Build/FitImage
+define Device/FitImage
   KERNEL_SUFFIX := -fit-uImage.itb
-  KERNEL = kernel-bin | gzip | fit gzip $(KDIR)/image-$(firstword $(DEVICE_DTS)).dtb 
+  KERNEL = kernel-bin | gzip | fit gzip $$(KDIR)/image-$$(DEVICE_DTS).dtb
   KERNEL_NAME := Image
 endef
 
-define Build/FitImageLzma
+define Device/FitImageLzma
   KERNEL_SUFFIX := -fit-uImage.itb
-  KERNEL = kernel-bin | lzma | fit lzma $(KDIR)/image-$(firstword $(DEVICE_DTS)).dtb 
+  KERNEL = kernel-bin | lzma | fit lzma $$(KDIR)/image-$$(DEVICE_DTS).dtb
   KERNEL_NAME := Image
 endef
 
@@ -44,18 +44,32 @@ endef
 ### Devices ###
 define Device/Default
   PROFILES := Default
+  DEVICE_DTS_DIR := ../dts
 endef
+
+define Device/fpga-board-nor
+  $(call Device/FitImageLzma)
+  DEVICE_VENDOR := SiliconWaves
+  DEVICE_MODEL := FPGA(nor)
+  DEVICE_DTS := siliconwaves-fpga
+  IMAGES := sysupgrade.bin
+  FILESYSTEMS := squashfs
+  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | check-size | append-metadata
+  DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver \
+        c_support kmod-shortcut-fe-cm iperf3
+endef
+TARGET_DEVICES += fpga-board-nor
 
 define Device/fpga-board
   DEVICE_VENDOR := SiliconWaves
-  DEVICE_MODEL := FPGA-01
+  DEVICE_MODEL := FPGA(sdcard)
   DEVICE_DTS := siliconwaves-fpga
   KERNEL := kernel-bin | gzip
   KERNEL_IMG := siliconwaves-fpga-kernel.bin
   IMAGES := sdcard.img.gz
   UBOOT_NAME := siliconwaves_fpga
+  FILESYSTEMS := ext4
   IMAGE/sdcard.img.gz := riscv-sdcard | append-metadata | gzip
-  DEVICE_DTS_DIR := ../dts
   DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver \
         c_support kmod-shortcut-fe-cm iperf3 u-boot-siliconwaves_fpga
 endef
