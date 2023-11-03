@@ -10,19 +10,19 @@ include $(TOPDIR)/rules.mk
 
 ARCH:=riscv64
 BOARD:=siliconwaves
-BOARDNAME:=Siliconwaves RISC-V
-SUBTARGETS:=w3k
-FEATURES:=boot-part ext4 rootfs-part
+BOARDNAME:=SIWAVES U-based RISC-V boards 
+SUBTARGETS:=generic
+FEATURES:= ext4 squashfs
+KERNELNAME:= Image dtbs
 
 KERNEL_PATCHVER:=5.10
 
+include $(INCLUDE_DIR)/target.mk
 define Target/Description
         Build firmware image for SilionWaves SoC devices.
         Currently produces SD Card image for siliconwaves test.
 endef
 
-KERNELNAME:= Image dtbs
-include $(INCLUDE_DIR)/target.mk
 DEFAULT_PACKAGES += e2fsprogs perf ethtool-full minicom default-settings-siliconwaves
 
 $(eval $(call BuildTarget))

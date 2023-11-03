@@ -18,28 +18,42 @@ MAKE_PATH:=$(PKG_NAME)
 
 include $(INCLUDE_DIR)/package.mk
 
-define Package/$(PKG_NAME)
+define Package/opensbi
     SECTION:=boot
     CATEGORY:=Boot Loaders
-    TITLE:=OpenSBI for siliconWaves w3k Soc
     DEPENDS:=@TARGET_siliconwaves
+    URL:=https://github.com/riscv/opensbi/blob/master/README.md
+    VARIANT:=$(subst _,/,$(subst opensbi_,,$(1)))
+    TITLE:=OpenSBI generic
+    OPENSBI_IMAGE:=
+    PLAT:=
+endef
+
+define Package/$(PKG_NAME)
+  $(Package/opensbi)
+  TITLE:=OpenSBI for Siliconwaves w3k
+  OPENSBI_IMAGE:=fw_dynamic.bin
+  PLAT:=generic
 endef
 
 #define Build/Prepare
 #endef
 
+export GCC_HONOUR_COPTS=s
+
+MAKE_VARS = \
+	CROSS_COMPILE="$(TARGET_CROSS)"
+
 define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR) CROSS_COMPILE=$(TARGET_CROSS)  \
-		PLATFORM=generic  INSTALL_LIB_PATH=lib FW_PIC=n
+	$(eval $(Package/opensbi_$(BUILD_VARIANT))) \
+		+$(MAKE_VARS) $(MAKE) -C $(PKG_BUILD_DIR) \
+		PLATFORM=$(PLAT)
 endef
 
 define Build/InstallDev
-	$(INSTALL_DIR) -p $(STAGING_DIR_IMAGE)
-	$(CP) $(PKG_BUILD_DIR)/build/platform/generic/firmware/fw_dynamic.bin  \
-	       $(STAGING_DIR_IMAGE)/
-endef
-
-define Package/$(PKG_NAME)/install
+	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
+	$(CP) $(PKG_BUILD_DIR)/build/platform/$(PLAT)/firmware/fw_dynamic.bin \
+		$(STAGING_DIR_IMAGE)/fw_dynamic-${BUILD_VARIANT}.bin
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))

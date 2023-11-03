@@ -8,51 +8,57 @@ include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/image.mk
 
 FAT32_BLOCK_SIZE=1024
-FAT32_BLOCKS=$(shell echo $$(($(CONFIG_TARGET_KERNEL_PARTSIZE)*1024*1024/$(FAT32_BLOCK_SIZE))))
+FAT32_BLOCKS=$(shell echo $$(($(CONFIG_SILICONWAVES_SD_BOOT_PARTSIZE)*1024*1024/$(FAT32_BLOCK_SIZE))))
+
+KERNEL_LOADADDR := 0x80200000
 
 define Build/Compile
-        $(CP) $(LINUX_DIR)/COPYING $(KDIR)/COPYING.linux
+   $(CP) $(LINUX_DIR)/COPYING $(KDIR)/COPYING.linux
+endef
+
+define Build/FitImage
+  KERNEL_SUFFIX := -fit-uImage.itb
+  KERNEL = kernel-bin | gzip | fit gzip $(KDIR)/image-$(firstword $(DEVICE_DTS)).dtb 
+  KERNEL_NAME := Image
+endef
+
+define Build/FitImageLzma
+  KERNEL_SUFFIX := -fit-uImage.itb
+  KERNEL = kernel-bin | lzma | fit lzma $(KDIR)/image-$(firstword $(DEVICE_DTS)).dtb 
+  KERNEL_NAME := Image
 endef
 
 ### Image scripts ###
-define Build/boot-common-w3k
-        rm -f $@.boot
-        mkfs.fat -n boot -C $@.boot $(FAT32_BLOCKS)
-        mcopy -i $@.boot extlinux-w3k ::extlinux
-        mcopy -i $@.boot $(IMAGE_KERNEL) ::$(KERNEL_IMG)
-	mcopy -i $@.boot $(KDIR)/image-$(firstword $(DEVICE_DTS)).dtb ::$(firstword $(DEVICE_DTS)).dtb
-endef
-
-define Build/sdcard-img-ext4
-        ./gen_siliconwaves_sdcard_img.sh $@ $@.boot $(IMAGE_ROOTFS) \
-                $(CONFIG_TARGET_KERNEL_PARTSIZE) $(CONFIG_TARGET_ROOTFS_PARTSIZE) \
-		$(STAGING_DIR_IMAGE)/$(DEVICE_NAME)/u-boot.itb \
-		$(STAGING_DIR_IMAGE)/$(DEVICE_NAME)/u-boot-spl.bin
+define Build/riscv-sdcard
+  rm -f $@.boot
+  mkfs.fat -n boot -C $@.boot $(FAT32_BLOCKS)
+  mcopy -i $@.boot extlinux-fpga ::extlinux
+  mcopy -i $@.boot $(IMAGE_KERNEL) ::$(KERNEL_IMG)
+  mcopy -i $@.boot $(KDIR)/image-$(firstword $(DEVICE_DTS)).dtb ::$(firstword $(DEVICE_DTS)).dtb
+  ./gen_siliconwaves_sdcard_img.sh $@ $@.boot $(IMAGE_ROOTFS) \
+    $(CONFIG_SILICONWAVES_SD_BOOT_PARTSIZE) $(CONFIG_TARGET_ROOTFS_PARTSIZE) \
+    $(STAGING_DIR_IMAGE)/$(UBOOT_NAME)-u-boot.itb \
+    $(STAGING_DIR_IMAGE)/$(UBOOT_NAME)-u-boot.itb-spl
 endef
 
 ### Devices ###
 define Device/Default
-  DEVICE_VENDOR := SiliconWaves
-  KERNEL := kernel-bin | gzip
-  KERNEL_IMG := kernel.img
-  IMAGES := factory.img.gz sysupgrade.img.gz
-  IMAGE/sysupgrade.img.gz := boot-common | sdcard-img | gzip | append-metadata
-  IMAGE/factory.img.gz := boot-common |  sdcard-img | gzip
+  PROFILES := Default
 endef
 
-define Device/siliconwaves-w3k-fpga
-  DEVICE_MODEL := w3k-fpga
-  DEVICE_VARIANT := (64bit)
-  KERNEL_IMG := siliconwaves-w3k-fpga-kernel.bin
-  DEVICE_DTS := siliconwaves-w3k-fpga
-  IMAGE/sysupgrade.img.gz := boot-common-w3k |  sdcard-img-ext4 | gzip | append-metadata
-  IMAGE/factory.img.gz := boot-common-w3k |sdcard-img-ext4 |gzip
+define Device/fpga-board
+  DEVICE_VENDOR := SiliconWaves
+  DEVICE_MODEL := FPGA-01
+  DEVICE_DTS := siliconwaves-fpga
+  KERNEL := kernel-bin | gzip
+  KERNEL_IMG := siliconwaves-fpga-kernel.bin
+  IMAGES := sdcard.img.gz
+  UBOOT_NAME := siliconwaves_fpga
+  IMAGE/sdcard.img.gz := riscv-sdcard | append-metadata | gzip
   DEVICE_DTS_DIR := ../dts
-  DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver c_support \
-		     kmod-shortcut-fe-cm iperf3
+  DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver \
+        c_support kmod-shortcut-fe-cm iperf3 u-boot-siliconwaves_fpga
 endef
-ifeq ($(SUBTARGET),w3k)
-  TARGET_DEVICES += siliconwaves-w3k-fpga
-endif
+TARGET_DEVICES += fpga-board
 
 $(eval $(call BuildImage))

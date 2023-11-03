@@ -19,7 +19,6 @@ endif
 
 export TMP_DIR:=$(TOPDIR)/tmp
 export TMPDIR:=$(TMP_DIR)
-export OPENSBI:=
 
 qstrip=$(strip $(subst ",,$(1)))
 #"))
