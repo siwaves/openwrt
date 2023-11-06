@@ -50,10 +50,13 @@ endef
 define Device/fpga-board-nor
   $(call Device/FitImageLzma)
   DEVICE_VENDOR := SiliconWaves
+  DEVICE_DTS_CONFIG := config@1
   DEVICE_MODEL := FPGA(nor)
   DEVICE_DTS := siliconwaves-fpga
   IMAGES := sysupgrade.bin
   FILESYSTEMS := squashfs
+  BLOCKSIZE := 64k
+  IMAGE_SIZE := 16384k
   IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | check-size | append-metadata
   DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver \
         c_support kmod-shortcut-fe-cm iperf3
