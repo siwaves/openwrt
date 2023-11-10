@@ -182,9 +182,10 @@
 		};
 		gpio0: gpio@3e204000 {
 			compatible = "siliconwaves,w3k-gpio";
+			interrupt-parent = <&plic0>;
+			#interrupt-cells = <1>;
 			gpio-controller;
 			#gpio-cells = <2>;
-			interrupt-parent = <&plic0>;
 			interrupts = <8>;
 			interrupt-controller;
 			reg = <0x0 0x3e204000 0x0 0x1000>;
