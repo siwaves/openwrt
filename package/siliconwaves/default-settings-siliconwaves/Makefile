@@ -33,9 +33,7 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/default-settings $(1)/etc/uci-defaults/99-default-settings
 	$(INSTALL_DIR) $(1)/bin
-	$(INSTALL_BIN) ./files/esptools $(1)/bin/
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/run_esp $(1)/etc/init.d/run_esp
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))

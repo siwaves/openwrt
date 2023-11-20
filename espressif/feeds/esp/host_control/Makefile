@@ -74,6 +74,8 @@ define Package/c_support/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/host/linux/host_control/c_support/esp-test $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/host/linux/host_control/c_support/esp-stress $(1)/usr/sbin
+	$(INSTALL_BIN) ./files/run_esp $(1)/etc/init.d/run_esp
+	$(INSTALL_BIN) ./files/esptools $(1)/bin/
 endef
 
 define Package/python_support/install
