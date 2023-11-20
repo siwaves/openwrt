@@ -58,8 +58,7 @@ define Device/fpga-board-nor
   BLOCKSIZE := 64k
   IMAGE_SIZE := 16384k
   IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | check-size | append-metadata
-  DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver \
-        c_support kmod-shortcut-fe-cm iperf3
+  DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-shortcut-fe-cm iperf3
 endef
 TARGET_DEVICES += fpga-board-nor
 
@@ -73,8 +72,8 @@ define Device/fpga-board
   UBOOT_NAME := siliconwaves_fpga
   FILESYSTEMS := ext4
   IMAGE/sdcard.img.gz := riscv-sdcard | append-metadata | gzip
-  DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-esp-hosted-fg-driver \
-        c_support kmod-shortcut-fe-cm iperf3 u-boot-siliconwaves_fpga
+  DEVICE_PACKAGES := kmod-led-driver-demo led-user-demo kmod-shortcut-fe-cm iperf3 \
+		     u-boot-siliconwaves_fpga
 endef
 TARGET_DEVICES += fpga-board
 
