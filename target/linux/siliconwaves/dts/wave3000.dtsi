@@ -102,7 +102,7 @@
 			reg-offset = <0x100>;
 			interrupts = <7>;
 			baud = <115200>;
-			clock-frequency = <37500000>;
+			clock-frequency = <25000000>;
 			status = "disabled";
 		};
 		uart1: serial@3e103200 {
@@ -114,7 +114,7 @@
 			reg-offset = <0x0>;
 			interrupts = <7>;
 			baud = <115200>;
-			clock-frequency = <37500000>;
+			clock-frequency = <25000000>;
 			status = "disabled";
 		};
 		sdhci0: sdhci@3e101000 {
@@ -135,15 +135,52 @@
 			#interrupt-cells = <1>;
 			compatible = "xlnx,axi-crossbar-2.0", "simple-bus";
 			ranges;
-			axi_ethernet_1_axi_ethernet_buffer: axi-ethernet@307c0000 {
+			axi_ethernet_1_axi_ethernet_buffer: axi-ethernet@30100000 {
 				clock-frequency = <100000000>;
 				compatible = "xlnx,axi-ethernet-buffer-2.0", "xlnx,axi-ethernet-3.01.a", "xlnx,axi-ethernet-1.00.a";
 				device_type = "network";
 				interrupt-parent = <&plic0>;
 				interrupts = <15>;
 				local-mac-address = [ 00 0a 35 00 d9 4d ];
+				phy-handle = <&phy1>;
+				reg = < 0x30100000 0x40000 0x30030000 0x10000 >;
+				xlnx,avb = <0x0>;
+				xlnx,halfdup = <0x0>;
+				xlnx,include-io = "1";
+				xlnx,mcast-extend = <0x0>;
+				xlnx,phy-type = <0x4>;
+				xlnx,phyaddr = <0x1>;
+				xlnx,rxcsum = <0x0>;
+				xlnx,rxmem = <0x1000>;
+				xlnx,rxvlan-strp = <0x0>;
+				xlnx,rxvlan-tag = <0x0>;
+				xlnx,rxvlan-tran = <0x0>;
+				xlnx,stats = <0x0>;
+				xlnx,txcsum = <0x0>;
+				xlnx,txmem = <0x1000>;
+				xlnx,txvlan-strp = <0x0>;
+				xlnx,txvlan-tag = <0x0>;
+				xlnx,txvlan-tran = <0x0>;
+				xlnx,type = <0x1>;
+				mdio {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					phy1: phy@1 {
+						compatible = "marvell,88E1111", "ethernet-phy-ieee802.3-c45";
+						device_type = "ethernet-phy";
+						reg = <2>;
+					};
+				};
+			};
+			axi_ethernet_0_axi_ethernet_buffer: axi-ethernet@30500000 {
+				clock-frequency = <100000000>;
+				compatible = "xlnx,axi-ethernet-buffer-2.0", "xlnx,axi-ethernet-3.01.a", "xlnx,axi-ethernet-1.00.a";
+				device_type = "network";
+				interrupt-parent = <&plic0>;
+				interrupts = <15>;
+				local-mac-address = [ 00 0a 35 00 d9 4e ];
 				phy-handle = <&phy0>;
-				reg = < 0x307c0000 0x40000 0x30030000 0x10000 >;
+				reg = < 0x30500000 0x40000 0x30400000 0x10000 >;
 				xlnx,avb = <0x0>;
 				xlnx,halfdup = <0x0>;
 				xlnx,include-io = "1";
