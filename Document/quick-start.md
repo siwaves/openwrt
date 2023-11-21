@@ -60,7 +60,7 @@ pip3 install pylibfdt
 ```
 git clone git@github.com:siwaves/openwrt.git
 cd openwrt
-git checkout openwrt-22.03-linux-5.10.168 
+git checkout openwrt-22.03-cmcc
 ```
 
 
@@ -78,32 +78,24 @@ git checkout openwrt-22.03-linux-5.10.168
 
 ## 3.2 选择siliconwaves-riscv平台
 
-当执行make menuconfig后，出现默认的配置，Target System 选择回车
+执行下面两条命令生成默认的.config文件
+```
+cat >> .config << EOF
+CONFIG_TARGET_siliconwaves=y
+CONFIG_TARGET_siliconwaves_generic=y
+CONFIG_TARGET_MULTI_PROFILE=y
+CONFIG_TARGET_BOARD="siliconwaves"
+CONFIG_TARGET_SUBTARGET="generic"
+CONFIG_TARGET_ARCH_PACKAGES="riscv64_riscv64"
+CONFIG_CPU_TYPE="riscv64"
+CONFIG_TARGET_DEVICE_siliconwaves_generic_DEVICE_fpga-board-nor=y
+CONFIG_TARGET_DEVICE_siliconwaves_generic_DEVICE_fpga-board=y
+EOF
+```
 
-![](./pictures/default.png)
-
-
-然后目录走到Siliconwaves RISC-V，空格选择
-
-![](./pictures/target-system-riscv.png)
-
-
-
-选择好**Siliconwaves RISC-V** 之后，选择 Save 回车如下
-
-![](./pictures/select-riscv-siliconwaves.png)
-
-
-
-此时所有配置都会自动选择，现在选择Exit。
-
-![exit](./pictures/exit.png)
-
-选择Yes，将生成.config。
-
-
-确认 Target System 是 Siliconwaves RISC-V 后，选择 Exit 。
-
+```
+make defconfig
+```
 
 ## 3.3 提前下载openwrt dl文件
 
@@ -136,7 +128,7 @@ make V=s -j72
 
 
 
-编译成功后，在 bin/targets/siliconwaves/w3k/ 目录下会生成 openwrt-siliconwaves-w3k-siliconwaves-w3k-fpga-ext4-factory.img.gz 软件。
+编译成功后，在 bin/targets/siliconwaves/generic/ 目录下会生成 openwrt-siliconwaves-generic-fpga-board-ext4-sdcard.img.gz 软件。
 
 作为参考，在环境2下，整个编译过程大概花了25分钟。
 
@@ -145,7 +137,7 @@ make V=s -j72
 将sd卡插入读卡器，读卡器连接到ubuntu主机，然后执行命令**ls /dev/sd***, 确认是哪个描述符时sd卡。
 制作启动卡的命令如下：
 ```
-zcat openwrt-siliconwaves-w3k-siliconwaves-w3k-fpga-ext4-factory.img.gz | sudo dd of=/dev/sdX bs=512K iflag=fullblock conv=fsync status=progress
+zcat openwrt-siliconwaves-generic-fpga-board-ext4-sdcard.img.gz | sudo dd of=/dev/sdX bs=512K iflag=fullblock conv=fsync status=progress
 ```
 X替换为实际的磁盘名字即可。
 执行完上述命令，启动磁盘就制作好了。
@@ -176,11 +168,11 @@ $ ls /dev/sdb*
    ```
    $ sudo mount /dev/sdX3 /mnt/
    $ ls /mnt/
-      extlinux siliconwaves-w3k-fpga-kernel.bin siliconwaves-fpga.dtb
+      extlinux siliconwaves-fpga-kernel.bin siliconwaves-fpga.dtb
    ```
-   其中siliconwaves-w3k-fpga-kernel.bin 为经过gz压缩的linux内核，
+   其中siliconwaves-fpga-kernel.bin 为经过gz压缩的linux内核，
     siliconwaves-fpga.dtb为linux内核的设备树文件。
-2. 在openwrt中，修改了内核代码build_dir/target-riscv64_w3k_musl/linux-siliconwaves_w3k/linux-5.10.168/，然后编译，会生成./build_dir/target-riscv64_w3k_musl/linux-siliconwaves_w3k/siliconwaves-w3k-fpga-kernel.bin。将此文件拷贝到步骤1挂载的/mnt下，即可以升级linux内核。
+2. 在openwrt中，修改了内核代码build_dir/target-riscv64_riscv64_musl/linux-siliconwaves_generic/linux-5.10.168，然后编译，会生成build_dir/target-riscv64_riscv64_musl/linux-siliconwaves_generic/linux-5.10.168/siliconwaves-fpga-kernel.bin。将此文件拷贝到步骤1挂载的/mnt下，即可以升级linux内核。
 
 
 # 6. 调试与开发
@@ -240,5 +232,10 @@ Usage:led-lightup [-hnv] [-n gpio-num 0-3][-v on-off 0/1]
 
 **led-lightup -n 3 -v 0** 熄灭编号为3的LED
 
+# 7.网速测试
 
+lan pc到wan pc测速结果
+![](./pictures/lan-to-wan.png)
 
+wan pc 到 lan pc测度结果
+![](./pictures/wan-to-lan.png)
