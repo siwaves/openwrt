@@ -6,7 +6,7 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 
 /* Clock frequency (in Hz) of the PCB crystal for rtcclk */
-#define RTCCLK_FREQ		12500000
+#define RTCCLK_FREQ		18750000
 
 / {
 	#address-cells = <2>;
