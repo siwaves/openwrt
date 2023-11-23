@@ -234,8 +234,8 @@ Usage:led-lightup [-hnv] [-n gpio-num 0-3][-v on-off 0/1]
 
 # 7.网速测试
 
-lan pc到wan pc测速结果
+lan pc到wan pc测速tcp结果
 ![](./pictures/lan-to-wan.png)
 
-wan pc 到 lan pc测度结果
+wan pc 到 lan pc测速tcp结果
 ![](./pictures/wan-to-lan.png)
